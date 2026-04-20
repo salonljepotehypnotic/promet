@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hypnotic â SpaÅ¡avanje zapisa</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #1A1A2E; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+  .card { background: #fff; color: #333; border-radius: 16px; padding: 28px; max-width: 580px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  h1 { color: #0D7377; margin: 0 0 6px; font-size: 20px; }
+  p { color: #666; margin: 0 0 16px; font-size: 14px; line-height: 1.5; }
+  .btn { background: #0D7377; color: white; border: none; border-radius: 10px; padding: 14px 24px; font-size: 15px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 8px; }
+  .btn:disabled { background: #aaa; cursor: default; }
+  .btn-danger { background: #e74c3c; }
+  .status { margin-top: 16px; padding: 14px; border-radius: 10px; font-size: 13px; display: none; line-height: 1.6; }
+  .ok { background: #e8f8f5; border: 1.5px solid #0D7377; color: #0D7377; display: block; }
+  .err { background: #fde8e8; border: 1.5px solid #e74c3c; color: #c0392b; display: block; }
+  .info { background: #f0f7ff; border: 1.5px solid #3498db; color: #2980b9; display: block; }
+  .row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .label { color: #888; }
+  .val { font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+  th { background: #f5f7fa; padding: 6px 10px; text-align: left; }
+  td { padding: 5px 10px; border-bottom: 1px solid #f0f0f0; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #0D7377; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>ð Hypnotic â SpaÅ¡avanje zapisa</h1>
+  <p>Ova stranica pronalazi zapise koji su snimljeni <strong>lokalno na ovom raÄunalu</strong> ali <strong>nisu stigli u Firebase</strong> (jer je moÅ¾da bila greÅ¡ka s internetom) i Å¡alje ih u bazu.</p>
+  <p><strong>Otvori ovu stranicu na svakom salon raÄunalu koje je radilo zapise.</strong></p>
+
+  <div id="scanResult" class="status"></div>
+
+  <button class="btn" id="scanBtn" onclick="scanAndRecover()">ð PronaÄi i poÅ¡alji lokalne zapise u Firebase</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyCSWE_s0qwvUxnMoj6OCW497sLdXwJHVcE",
+  authDomain: "salon-ljepote-hypnotic-63b86.firebaseapp.com",
+  databaseURL: "https://salon-ljepote-hypnotic-63b86-default-rtdb.firebaseio.com",
+  projectId: "salon-ljepote-hypnotic-63b86",
+  storageBucket: "salon-ljepote-hypnotic-63b86.firebasestorage.app",
+  messagingSenderId: "5097250870",
+  appId: "1:5097250870:web:d7a21ad59d0d8a52f13897"
+});
+const db = firebase.database();
+const STORE_KEY = 'hypnotic_promet_v2';
+
+// Seed entry IDs â these are built-in demo entries, never send to Firebase
+const SEED_IDS_RAW = [];
+const SEED_IDS = new Set(SEED_IDS_RAW);
+
+function fmtDate(d) {
+  if (!d) return '?';
+  try { const [y,m,dd]=d.split('-'); return `${dd}.${m}.${y}`; } catch(e) { return d; }
+}
+
+async function scanAndRecover() {
+  const btn = document.getElementById('scanBtn');
+  const statusEl = document.getElementById('scanResult');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Skeniranje...';
+  statusEl.className = 'status info';
+  statusEl.innerHTML = '<span class="spinner"></span> Äitam lokalne zapise...';
+
+  // 1. Read localStorage
+  let localEntries = [];
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) {
+      statusEl.className = 'status err';
+      statusEl.innerHTML = 'â Nema lokalnih podataka na ovom raÄunalu (localStorage je prazan).';
+      btn.disabled = false; btn.textContent = 'ð PronaÄi i poÅ¡alji';
+      return;
+    }
+    const localData = JSON.parse(raw);
+    localEntries = (localData.entries || []).filter(e => e && e.id && e.date && !SEED_IDS.has(e.id));
+  } catch(e) {
+    statusEl.className = 'status err';
+    statusEl.innerHTML = `â GreÅ¡ka Äitanja localStorage: ${e.message}`;
+    btn.disabled = false; btn.textContent = 'ð Ponovi';
+    return;
+  }
+
+  if (localEntries.length === 0) {
+    statusEl.className = 'status info';
+    statusEl.innerHTML = 'â ï¸ Nema zapisa u lokalnoj memoriji ovog raÄunala.';
+    btn.disabled = false; btn.textContent = 'ð Ponovi';
+    return;
+  }
+
+  statusEl.innerHTML = `<span class="spinner"></span> PronaÄeno ${localEntries.length} lokalnih zapisa. UsporeÄujem s Firebase...`;
+
+  // 2. Read Firebase entries (shallow)
+  let fbEntryIds = new Set();
+  try {
+    const snap = await db.ref('hypnotic/entries').once('value');
+    const fbEntries = snap.val() || {};
+    fbEntryIds = new Set(Object.keys(fbEntries));
+  } catch(e) {
+    statusEl.className = 'status err';
+    statusEl.innerHTML = `â Ne mogu Äitati Firebase: ${e.message}`;
+    btn.disabled = false; btn.textContent = 'ð Ponovi';
+    return;
+  }
+
+  // 3. Find missing entries
+  const missing = localEntries.filter(e => !fbEntryIds.has(e.id));
+  const localDates = localEntries.map(e=>e.date).sort();
+  const localLatest = localDates[localDates.length-1];
+  const missingDates = missing.map(e=>e.date).sort();
+
+  if (missing.length === 0) {
+    const rows = Object.entries(
+      localEntries.reduce((acc,e) => { acc[e.date]=(acc[e.date]||0)+1; return acc; }, {})
+    ).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5);
+
+    statusEl.className = 'status ok';
+    statusEl.innerHTML = `
+      â Svi lokalni zapisi veÄ postoje u Firebase-u!<br>
+      <small>Lokalni zapisi: ${localEntries.length} | Zadnji: ${fmtDate(localLatest)}</small>
+      <table><tr><th>Datum</th><th>Broj zapisa</th></tr>
+      ${rows.map(([d,n])=>`<tr><td>${fmtDate(d)}</td><td>${n}</td></tr>`).join('')}
+      </table>
+    `;
+    btn.disabled = false; btn.textContent = 'â Sve je u redu';
+    return;
+  }
+
+  // 4. Push missing entries to Firebase
+  statusEl.innerHTML = `<span class="spinner"></span> Å aljem ${missing.length} zapisa u Firebase...`;
+
+  try {
+    const updates = {};
+    missing.forEach(e => { updates[e.id] = e; });
+    await db.ref('hypnotic/entries').update(updates);
+
+    // Group by date for display
+    const byDate = {};
+    missing.forEach(e => { byDate[e.date]=(byDate[e.date]||0)+1; });
+    const dateRows = Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0]));
+
+    statusEl.className = 'status ok';
+    statusEl.innerHTML = `
+      â UspjeÅ¡no spaÅ¡eno <strong>${missing.length} zapisa</strong> u Firebase!<br>
+      <small>Ovi zapisi su sada vidljivi na svim raÄunalima.</small>
+      <table>
+        <tr><th>Datum</th><th>SpaÅ¡eno zapisa</th></tr>
+        ${dateRows.map(([d,n])=>`<tr><td>${fmtDate(d)}</td><td>${n}</td></tr>`).join('')}
+      </table>
+      <br><strong>OsvjeÅ¾i aplikaciju na svim raÄunalima da vidiÅ¡ zapise.</strong>
+    `;
+    btn.textContent = `â SpaÅ¡eno ${missing.length} zapisa!`;
+  } catch(e) {
+    statusEl.className = 'status err';
+    statusEl.innerHTML = `â GreÅ¡ka slanja u Firebase: ${e.message}`;
+    btn.disabled = false; btn.textContent = 'ð PokuÅ¡aj ponovo';
+  }
+}
+</script>
+</body>
+</html>
