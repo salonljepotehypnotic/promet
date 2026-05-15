@@ -414,7 +414,7 @@ function LoginScreen({ data, onLogin }) {
               style={{width:'100%',padding:'12px 16px',border:`2px solid ${error?'var(--red)':'var(--border)'}`,borderRadius:10,fontSize:18,textAlign:'center',letterSpacing:6,outline:'none',fontFamily:'inherit'}}
             />
             {error && <div className="pin-error">{error}</div>}
-            <div className="pin-hint">Lozinku promijeni u Postavkama</div>
+            <div className="pin-hint">Zadana lozinka: {isAdmin?'9999':(selected==='savska'?'1234':'5678')} (promijeni u Postavkama)</div>
             <button className="btn btn-primary" style={{width:'100%',marginTop:12,justifyContent:'center'}}
               onClick={tryLogin}>Prijavi se →</button>
           </div>
@@ -622,7 +622,10 @@ function Pregled({ data, salonId, onRefresh }) {
     });
     rows.sort((a,b) => {
       const av=a[sortCol]??'', bv=b[sortCol]??'';
-      return sortDir*(av<bv?-1:av>bv?1:0);
+      const cmp=sortDir*(av<bv?-1:av>bv?1:0);
+      if (cmp!==0) return cmp;
+      const ca=a.createdAt??'', cb=b.createdAt??'';
+      return ca<cb?1:ca>cb?-1:0;
     });
     return rows;
   }, [data.entries, fSalon, fFrom, fTo, search, sortCol, sortDir]);
@@ -719,7 +722,7 @@ function Pregled({ data, salonId, onRefresh }) {
                     {salonId==='all'&&<td><span className="badge" style={{background:(sal?.color||'#888')+'22',color:sal?.color||'#888'}}>{sal?.name||e.salon}</span></td>}
                     <td>{isEdit?<input type="text" value={editRow.clientName} style={{width:150}} onChange={x=>setEditRow(r=>({...r,clientName:x.target.value}))}/>:e.clientName}</td>
                     <td>{isEdit?<input type="text" value={editRow.staff} style={{width:130}} onChange={x=>setEditRow(r=>({...r,staff:x.target.value}))}/>:e.staff}</td>
-                    <td>{isEdit?<input type="text" value={editRow.service} style={{width:170}} onChange={x=>setEditRow(r=>({...r,service:x.target.value}))}/>:e.service}</td>
+                    <td>{isEdit?<select value={editRow.service} style={{width:190,fontSize:11}} onChange={x=>{const svc=data.services.find(s=>s.name===x.target.value&&s.salonId===editRow.salon);setEditRow(r=>({...r,service:x.target.value,...(svc?{price:svc.price,total:Math.round(svc.price*(r.quantity||1)*(1-(r.discount||0)/100)*100)/100}:{})}));}}>{[...new Set([editRow.service,...data.services.filter(s=>s.salonId===editRow.salon).map(s=>s.name)])].map((n,i)=><option key={i} value={n}>{n}</option>)}</select>:e.service}</td>
                     <td>{isEdit?<input type="number" value={editRow.price} style={{width:70}} onChange={x=>setEditRow(r=>({...r,price:x.target.value}))}/>:`€${fmt(e.price)}`}</td>
                     <td>{isEdit?<input type="number" value={editRow.discount} style={{width:50}} onChange={x=>setEditRow(r=>({...r,discount:x.target.value}))}/>:(e.discount?e.discount+'%':'—')}</td>
                     <td className="td-amount">€{fmt(e.total)}</td>
@@ -3403,17 +3406,9 @@ function Klijentice({ data, salonId, onRefresh }) {
         )}
 
         {/* Edit modal */}
-        {editMode && editClient && (()=>{
-          const allClientNames = [...new Set([
-            ...(data.clients||[]).map(c=>c.name),
-            ...data.entries.map(e=>e.clientName)
-          ].filter(Boolean))].sort();
-          return (
+        {editMode && editClient && (
           <div className="card" style={{maxHeight:'calc(100vh - 240px)',overflowY:'auto'}}>
             <div style={{fontSize:16,fontWeight:700,marginBottom:16}}>✎ Uredi profil</div>
-            <datalist id="client-names-list">
-              {allClientNames.map(n=><option key={n} value={n}/>)}
-            </datalist>
             {[
               ['Ime i prezime','name','text'],
               ['Telefon','phone','tel'],
@@ -3424,8 +3419,7 @@ function Klijentice({ data, salonId, onRefresh }) {
                 <label style={{fontSize:12,color:'#666',fontWeight:600,display:'block',marginBottom:4}}>{label}</label>
                 <input type={type} value={editClient[field]||''}
                   onChange={e=>setEditClient(c=>({...c,[field]:e.target.value}))}
-                  style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}}
-                  {...(field==='name' ? {list:'client-names-list', autoComplete:'off'} : {})} />
+                  style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
               </div>
             ))}
             <div style={{marginBottom:12}}>
@@ -3452,8 +3446,7 @@ function Klijentice({ data, salonId, onRefresh }) {
               <button className="btn btn-sm" style={{background:'#eee'}} onClick={()=>setEditMode(false)}>Odustani</button>
             </div>
           </div>
-          );
-        })()}
+        )}
       </div>
       )} {/* end default list */}
     </div>
@@ -3465,7 +3458,7 @@ const EXPENSE_CATEGORIES = ['PLAĆA','FIKSNI TROŠKOVI','MATERIJAL','MARKETING',
 const EXPENSE_CAT_COLORS = {'PLAĆA':'#E74C3C','FIKSNI TROŠKOVI':'#E67E22','MATERIJAL':'#3498DB','MARKETING':'#9B59B6','EDUKACIJA':'#1ABC9C','OSTALO':'#95A5A6'};
 
 // ─── Provjera prometa ─────────────────────────────────────────────────────
-function Provjera({ data, salonId, onRefresh }) {
+function Provjera({ data, salonId }) {
   const now2 = new Date();
   const thisMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
   const prevMonthDate = new Date(now2.getFullYear(), now2.getMonth()-1, 1);
@@ -3475,8 +3468,6 @@ function Provjera({ data, salonId, onRefresh }) {
   const [toDate, setToDate] = useState('');
   const [prvSalon, setPrvSalon] = useState(salonId==='all' ? 'all' : salonId);
   const [prvView, setPrvView] = useState('simple'); // 'simple' | 'staff'
-  const [toast, setToast] = useState(null);
-  const save = d => { saveData(d); if(onRefresh) onRefresh(d); };
 
   const {from, to} = useMemo(()=>{
     if (period==='month') return {from:thisMonth+'-01', to:today()};
@@ -3506,7 +3497,7 @@ function Provjera({ data, salonId, onRefresh }) {
 
   const allPaymentTypes = useMemo(()=>{
     const s=new Set();
-    entries.forEach(e=>{ const p=normPayment(e.payment)||'Ostalo'; s.add(p); });
+    entries.forEach(e=>{ const p=normPayment(e.payment); if(p) s.add(p); });
     return [...s].sort();
   }, [entries]);
 
@@ -3541,7 +3532,7 @@ function Provjera({ data, salonId, onRefresh }) {
   const grandTotals = useMemo(()=>{
     const t={};
     entries.forEach(e=>{
-      if (hiddenPayments.has(normPayment(e.payment)||'Ostalo')) return;
+      if (hiddenPayments.has(normPayment(e.payment))) return;
       const st=normSt(e.staff); t[st]=(t[st]||0)+(e.total||0);
     });
     return t;
@@ -3577,8 +3568,6 @@ function Provjera({ data, salonId, onRefresh }) {
 
   return (
     <div>
-      {toast && <div style={{position:'fixed',bottom:24,right:24,zIndex:9999,background:toast.type==='error'?'#c0392b':'#1abc9c',color:'#fff',padding:'12px 22px',borderRadius:10,fontWeight:700,fontSize:14,boxShadow:'0 4px 16px rgba(0,0,0,0.18)'}}
-        onClick={()=>setToast(null)}>{toast.msg}</div>}
       {/* Controls */}
       <div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center',flexWrap:'wrap',background:'var(--card)',borderRadius:12,padding:'12px 16px',border:'1.5px solid var(--border)'}}>
         {[['month','Ovaj mj.'],['prev','Prošli mj.'],['custom','Po datumima']].map(([k,l])=>(
@@ -3677,20 +3666,13 @@ function Provjera({ data, salonId, onRefresh }) {
 
       {/* Bonus za djelatnice + isplata za praktikantice */}
       {salonId==='all' && prvView==='staff' && visibleCols.length>0 && (()=>{
-        // Točno 5 načina koji ulaze u promet — usporedba case-insensitive (rješava đ/Đ problem)
-        const BONUS_TYPES = ['GOTOVINA','KARTICA','OSTALO-NE','IZ PAKETA','POKLON BON-odrađeno','AKONTACIJA'];
-        const bonusPaymentsUpper = new Set(BONUS_TYPES.map(p=>p.toUpperCase()));
+        const bonusPayments = new Set(['AKONTACIJA','GOTOVINA','KARTICA','OSTALO-NE','IZ PAKETA','POKLON BON-odrađeno']);
         const staffRoleMap = {};
-        const staffSalonMap = {};
-        (data.staff||[]).forEach(s=>{
-          const k=(s.name||'').toUpperCase().trim();
-          staffRoleMap[k] = s.role||'djelatnica';
-          staffSalonMap[k] = s.salonId;
-        });
+        (data.staff||[]).forEach(s=>{ staffRoleMap[(s.name||'').toUpperCase().trim()] = s.role||'djelatnica'; });
         const bonusTotals = {};
         entries.forEach(e=>{
-          const pay = (normPayment(e.payment)||'').toUpperCase();
-          if (!bonusPaymentsUpper.has(pay)) return;
+          const pay = (e.payment||'').toUpperCase().trim();
+          if (!bonusPayments.has(pay)) return;
           const st = normSt(e.staff);
           bonusTotals[st] = (bonusTotals[st]||0) + (e.total||0);
         });
@@ -3716,7 +3698,7 @@ function Provjera({ data, salonId, onRefresh }) {
               <div className="card" style={{marginBottom:14,padding:'16px 20px'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
                   <div className="card-title" style={{margin:0,fontSize:15}}>👩 Djelatnice — promet i bonus</div>
-                  <span style={{fontSize:12,color:'#999'}}>{BONUS_TYPES.join(' · ')}</span>
+                  <span style={{fontSize:12,color:'#999'}}>AKONTACIJA · GOTOVINA · KARTICA · OSTALO-NE · IZ PAKETA · POKLON BON-odrađeno</span>
                 </div>
                 <div style={{overflowX:'auto'}}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
@@ -3757,36 +3739,9 @@ function Provjera({ data, salonId, onRefresh }) {
                     </tbody>
                   </table>
                 </div>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginTop:10}}>
-                  <p style={{fontSize:11,color:'#aaa',margin:0}}>
-                    Bonus: 12% (4.001–5.000€) · 15% (5.001–6.500€) · 18% (6.500€+) — računa se na iznos iznad 4.000€
-                  </p>
-                  <button
-                    style={{padding:'7px 16px',borderRadius:8,border:'none',cursor:'pointer',fontSize:13,fontWeight:700,
-                      background:'var(--gold)',color:'#fff',display:'flex',alignItems:'center',gap:6}}
-                    onClick={()=>{
-                      const newExp = djelatnice
-                        .map(st=>({ bonus:calcBonus(bonusTotals[st]||0), st }))
-                        .filter(({bonus})=>bonus>0)
-                        .map(({bonus,st})=>({
-                          id:uid(),
-                          salonId: staffSalonMap[st] || (salonId==='all'?(data.salons[0]?.id||'savska'):salonId),
-                          date: to,
-                          category: 'BONUSI',
-                          subcategory: st,
-                          amount: Math.round(bonus*100)/100,
-                          note: `Bonus ${from} – ${to}`,
-                          type: 'varijabilni',
-                          dobavljac: '',
-                          createdAt: new Date().toISOString()
-                        }));
-                      if(!newExp.length){ setToast({msg:'Nema bonusa za dodati (nitko nije prešao prag od 4.000€).',type:'error'}); return; }
-                      save({...data, expenses:[...(data.expenses||[]), ...newExp]});
-                      setToast({msg:`✅ Dodano ${newExp.length} bonus unos(a) u Troškove!`});
-                    }}>
-                    💾 Dodaj bonuse u Troškove
-                  </button>
-                </div>
+                <p style={{fontSize:11,color:'#aaa',marginTop:8,marginBottom:0}}>
+                  Bonus: 12% (4.001–5.000€) · 15% (5.001–6.500€) · 18% (6.500€+) — računa se na iznos iznad 4.000€
+                </p>
               </div>
             )}
 
@@ -3794,7 +3749,7 @@ function Provjera({ data, salonId, onRefresh }) {
               <div className="card" style={{marginBottom:14,padding:'16px 20px'}}>
                 <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
                   <div className="card-title" style={{margin:0,fontSize:15}}>🎓 Praktikantice — promet i isplata</div>
-                  <span style={{fontSize:12,color:'#999'}}>{BONUS_TYPES.join(' · ')}</span>
+                  <span style={{fontSize:12,color:'#999'}}>AKONTACIJA · GOTOVINA · KARTICA · OSTALO-NE · IZ PAKETA · POKLON BON-odrađeno</span>
                 </div>
                 <div style={{overflowX:'auto'}}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
@@ -3831,33 +3786,6 @@ function Provjera({ data, salonId, onRefresh }) {
                       </tr>
                     </tbody>
                   </table>
-                </div>
-                <div style={{display:'flex',justifyContent:'flex-end',marginTop:10}}>
-                  <button
-                    style={{padding:'7px 16px',borderRadius:8,border:'none',cursor:'pointer',fontSize:13,fontWeight:700,
-                      background:'#E65100',color:'#fff',display:'flex',alignItems:'center',gap:6}}
-                    onClick={()=>{
-                      const newExp = praktikantice
-                        .map(st=>({ isplata: Math.round((bonusTotals[st]||0)*0.15*100)/100, st }))
-                        .filter(({isplata})=>isplata>0)
-                        .map(({isplata,st})=>({
-                          id:uid(),
-                          salonId: staffSalonMap[st] || (salonId==='all'?(data.salons[0]?.id||'savska'):salonId),
-                          date: to,
-                          category: 'PLAĆA',
-                          subcategory: st,
-                          amount: isplata,
-                          note: `Isplata praktikantice ${from} – ${to}`,
-                          type: 'varijabilni',
-                          dobavljac: '',
-                          createdAt: new Date().toISOString()
-                        }));
-                      if(!newExp.length){ setToast({msg:'Nema isplata za dodati.',type:'error'}); return; }
-                      save({...data, expenses:[...(data.expenses||[]), ...newExp]});
-                      setToast({msg:`✅ Dodano ${newExp.length} isplata praktikantica u Troškove!`});
-                    }}>
-                    💾 Dodaj isplate u Troškove
-                  </button>
                 </div>
               </div>
             )}
@@ -4177,43 +4105,9 @@ function Troskovi({ data, salonId, onRefresh }) {
     setToast({msg:`Kopirano ${newExp.length} fiksnih troškova iz ${prevMonth}!`});
   };
 
-  const copyToNextMonth = () => {
-    if (!fMonth) { setToast({msg:'Odaberite izvorni mjesec!',type:'error'}); return; }
-    const [y,m] = fMonth.split('-').map(Number);
-    const nextDate = new Date(y, m, 1);
-    const nextMonth = `${nextDate.getFullYear()}-${String(nextDate.getMonth()+1).padStart(2,'0')}`;
-    const toCopy = expenses.filter(e => e.date.startsWith(fMonth) && e.type==='fiksni' && (!fSalon||e.salonId===fSalon));
-    if (!toCopy.length) { setToast({msg:`Nema fiksnih troškova u ${fMonth}!`,type:'error'}); return; }
-    const alreadyExist = expenses.some(e => e.date.startsWith(nextMonth) && e.type==='fiksni' && (!fSalon||e.salonId===fSalon));
-    if (alreadyExist && !confirm(`Već postoje fiksni troškovi za ${nextMonth}. Dodati još?`)) return;
-    const newExp = toCopy.map(e => ({...e, id:uid(), date:nextMonth+'-'+e.date.slice(8), createdAt:new Date().toISOString()}));
-    save({...data, expenses:[...expenses, ...newExp]});
-    setToast({msg:`✅ Kopirano ${newExp.length} fiksnih troškova u ${nextMonth}!`});
-  };
-
-  const copyToPrevMonth = () => {
-    if (!fMonth) { setToast({msg:'Odaberite izvorni mjesec!',type:'error'}); return; }
-    const [y,m] = fMonth.split('-').map(Number);
-    const prevDate = new Date(y, m-2, 1);
-    const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
-    const toCopy = expenses.filter(e => e.date.startsWith(fMonth) && e.type==='fiksni' && (!fSalon||e.salonId===fSalon));
-    if (!toCopy.length) { setToast({msg:`Nema fiksnih troškova u ${fMonth}!`,type:'error'}); return; }
-    const alreadyExist = expenses.some(e => e.date.startsWith(prevMonth) && e.type==='fiksni' && (!fSalon||e.salonId===fSalon));
-    if (alreadyExist && !confirm(`Već postoje fiksni troškovi za ${prevMonth}. Dodati još?`)) return;
-    const newExp = toCopy.map(e => ({...e, id:uid(), date:prevMonth+'-'+e.date.slice(8), createdAt:new Date().toISOString()}));
-    save({...data, expenses:[...expenses, ...newExp]});
-    setToast({msg:`✅ Kopirano ${newExp.length} fiksnih troškova u ${prevMonth}!`});
-  };
-
   const delExpense = id => {
     if (!confirm('Obriši trošak?')) return;
     save({...data, expenses:expenses.filter(e=>e.id!==id)});
-  };
-
-  const saveEditExpense = () => {
-    const updated = expenses.map(e => e.id===editId ? {...editRow, amount:parseFloat(editRow.amount)||0} : e);
-    save({...data, expenses:updated});
-    setEditId(null); setEditRow(null);
   };
 
   // Filtered expenses for selected month/salon
@@ -4225,21 +4119,11 @@ function Troskovi({ data, salonId, onRefresh }) {
     });
   }, [expenses, fSalon, fMonth]);
 
-  // Načini plaćanja koji ulaze u ukupni prihod (bez IZ PAKETA i POKLON BON-odrađeno)
-  const PRIHOD_PAYMENTS = new Set([
-    'GOTOVINA','KARTICA','OSTALO-NE',
-    'PAKET-GOTOVINA +','PAKET-GOTOVINA -','PAKET-KARTICA',
-    'POKLON BON-GOTOVINA +','POKLON BON-GOTOVINA -','POKLON BON-KARTICA',
-    'KOZMETIKA GOTOVINA +','KOZMETIKA GOTOVINA -','KOZMETIKA KARTICA',
-    'AKONTACIJA'
-  ].map(p=>p.toUpperCase()));
-
   // Revenue for same filter
   const filteredRev = useMemo(() => {
     return data.entries.filter(e => {
       if (fSalon && e.salon !== fSalon) return false;
       if (fMonth && !e.date.startsWith(fMonth)) return false;
-      if (!PRIHOD_PAYMENTS.has((normPayment(e.payment)||'').toUpperCase())) return false;
       return true;
     });
   }, [data.entries, fSalon, fMonth]);
@@ -4261,12 +4145,6 @@ function Troskovi({ data, salonId, onRefresh }) {
     supplierMap[e.dobavljac] = (supplierMap[e.dobavljac]||0) + e.amount;
   });
 
-  // Svi unikatni dobavljači iz SVIH troškova (za autocomplete)
-  const allSuppliers = useMemo(() => {
-    const s = new Set(expenses.filter(e=>e.dobavljac).map(e=>e.dobavljac));
-    return [...s].sort();
-  }, [expenses]);
-
   // Monthly profit overview (last 12 months)
   const months = useMemo(() => {
     const allMonths = new Set([
@@ -4279,7 +4157,7 @@ function Troskovi({ data, salonId, onRefresh }) {
   const monthlyData = useMemo(() => {
     return months.map(m => {
       const mExpenses = expenses.filter(e=>(fSalon?e.salonId===fSalon:true)&&e.date.startsWith(m)).reduce((s,e)=>s+e.amount,0);
-      const mRevenue  = data.entries.filter(e=>(fSalon?e.salon===fSalon:true)&&e.date.startsWith(m)&&PRIHOD_PAYMENTS.has((normPayment(e.payment)||'').toUpperCase())).reduce((s,e)=>s+e.total,0);
+      const mRevenue  = data.entries.filter(e=>(fSalon?e.salon===fSalon:true)&&e.date.startsWith(m)).reduce((s,e)=>s+e.total,0);
       return { month:m, revenue:mRevenue, expenses:mExpenses, profit:mRevenue-mExpenses };
     });
   }, [months, data.entries, expenses, fSalon]);
@@ -4370,11 +4248,7 @@ function Troskovi({ data, salonId, onRefresh }) {
             <div className="form-group">
               <label>🏭 Dobavljač / Firma</label>
               <input value={form.dobavljac} onChange={e=>set('dobavljac',e.target.value)}
-                placeholder="npr. L'Oréal, OTP banka, Ivan Perić..."
-                list="suppliers-list" autoComplete="off"/>
-              <datalist id="suppliers-list">
-                {allSuppliers.map(s=><option key={s} value={s}/>)}
-              </datalist>
+                placeholder="npr. L'Oréal, OTP banka, Ivan Perić..." />
             </div>
             <div className="form-group wide">
               <label>📎 Napomena</label>
@@ -4389,20 +4263,10 @@ function Troskovi({ data, salonId, onRefresh }) {
         <div className="card">
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:12}}>
             <div className="card-title" style={{marginBottom:0}}>📋 Troškovi — {fMonth ? `${MONTH_NAMES[parseInt(fMonth.split('-')[1])]} ${fMonth.split('-')[0]}` : 'Sve'}</div>
-            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-              <button className="btn btn-sm btn-outline" style={{color:'#E67E22',borderColor:'#E67E22'}} onClick={copyFixedCosts}
-                title="Kopira fiksne troškove iz prošlog mjeseca u odabrani">
-                📋 Kopiraj iz prošlog mj.
-              </button>
-              <button className="btn btn-sm btn-outline" style={{color:'#8e44ad',borderColor:'#8e44ad'}} onClick={copyToPrevMonth}
-                title="Kopira fiksne troškove iz odabranog mjeseca u prošli">
-                📋 Kopiraj u prošli mj.
-              </button>
-              <button className="btn btn-sm btn-outline" style={{color:'#27ae60',borderColor:'#27ae60'}} onClick={copyToNextMonth}
-                title="Kopira fiksne troškove iz odabranog mjeseca u idući">
-                📋 Kopiraj u idući mj.
-              </button>
-            </div>
+            <button className="btn btn-sm btn-outline" style={{color:'#E67E22',borderColor:'#E67E22'}} onClick={copyFixedCosts}
+              title="Kopira sve fiksne troškove iz prošlog mjeseca u odabrani trenutni mjesec">
+              📋 Kopiraj fiksne troškove iz prošlog mj.
+            </button>
           </div>
           {filteredExp.length === 0 ? (
             <p style={{color:'#aaa',textAlign:'center',padding:24}}>Nema troškova za odabrani period.</p>
@@ -4436,43 +4300,16 @@ function Troskovi({ data, salonId, onRefresh }) {
                   <tbody>
                     {filteredExp.sort((a,b)=>b.date.localeCompare(a.date)).map((e,i)=>{
                       const sal = data.salons.find(s=>s.id===e.salonId);
-                      const isEdit = editId===e.id;
-                      const inp = {padding:'4px 6px',border:'1.5px solid var(--teal)',borderRadius:6,fontSize:12,fontFamily:'inherit',outline:'none'};
                       return (
-                        <tr key={e.id} className={i%2===1?'tr-alt':''} style={isEdit?{background:'#F0FBF8'}:{}}>
-                          <td style={{whiteSpace:'nowrap'}}>
-                            {isEdit ? <input type="date" value={editRow.date} style={{...inp,width:130}} onChange={x=>setEditRow(r=>({...r,date:x.target.value}))}/> : fmtDate(e.date)}
-                          </td>
-                          <td>
-                            {isEdit ? <select value={editRow.type} style={{...inp}} onChange={x=>setEditRow(r=>({...r,type:x.target.value}))}>
-                              <option value="fiksni">fiksni</option><option value="varijabilni">varijabilni</option>
-                            </select> : <span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:e.type==='fiksni'?'#E3F2FD':'#FFF3E0',color:e.type==='fiksni'?'#1565C0':'#E65100'}}>{e.type}</span>}
-                          </td>
-                          <td>
-                            {isEdit ? <select value={editRow.category} style={{...inp}} onChange={x=>setEditRow(r=>({...r,category:x.target.value}))}>
-                              {[...EXPENSE_CATEGORIES,'BONUSI'].map(c=><option key={c}>{c}</option>)}
-                            </select> : <span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:(EXPENSE_CAT_COLORS[e.category]||'#888')+'22',color:EXPENSE_CAT_COLORS[e.category]||'#888',fontWeight:700}}>{e.category}</span>}
-                          </td>
-                          <td style={{fontSize:13}}>
-                            {isEdit ? <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
-                              <input placeholder="Opis" value={editRow.subcategory||''} style={{...inp,width:110}} onChange={x=>setEditRow(r=>({...r,subcategory:x.target.value}))}/>
-                              <input placeholder="Napomena" value={editRow.note||''} style={{...inp,width:110}} onChange={x=>setEditRow(r=>({...r,note:x.target.value}))}/>
-                            </div> : <>{e.subcategory}{e.note?` · ${e.note}`:''}</>}
-                          </td>
-                          <td style={{fontSize:12,color:'#555'}}>
-                            {isEdit ? <input placeholder="Dobavljač" value={editRow.dobavljac||''} style={{...inp,width:90}} onChange={x=>setEditRow(r=>({...r,dobavljac:x.target.value}))}/> : (e.dobavljac||'—')}
-                          </td>
+                        <tr key={e.id} className={i%2===1?'tr-alt':''}>
+                          <td style={{whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
+                          <td><span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:e.type==='fiksni'?'#E3F2FD':'#FFF3E0',color:e.type==='fiksni'?'#1565C0':'#E65100'}}>{e.type}</span></td>
+                          <td><span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:(EXPENSE_CAT_COLORS[e.category]||'#888')+'22',color:EXPENSE_CAT_COLORS[e.category]||'#888',fontWeight:700}}>{e.category}</span></td>
+                          <td style={{fontSize:13}}>{e.subcategory}{e.note?` · ${e.note}`:''}</td>
+                          <td style={{fontSize:12,color:'#555'}}>{e.dobavljac||'—'}</td>
                           {salonId==='all'&&<td style={{fontSize:12}}>{sal?.name||e.salonId}</td>}
-                          <td className="td-amount" style={{fontWeight:700,color:'var(--red)'}}>
-                            {isEdit ? <input type="number" value={editRow.amount} style={{...inp,width:80,textAlign:'right'}} onChange={x=>setEditRow(r=>({...r,amount:x.target.value}))}/> : `€${fmt(e.amount)}`}
-                          </td>
-                          <td style={{whiteSpace:'nowrap'}}>
-                            {isEdit
-                              ? <><button className="btn btn-sm btn-primary" style={{marginRight:4}} onClick={saveEditExpense}>✓</button>
-                                  <button className="btn btn-sm btn-outline" onClick={()=>{setEditId(null);setEditRow(null);}}>✕</button></>
-                              : <><button className="btn btn-sm btn-outline" style={{marginRight:4}} onClick={()=>{setEditId(e.id);setEditRow({...e});}}>✎</button>
-                                  <button className="btn btn-danger btn-sm" onClick={()=>delExpense(e.id)}>🗑</button></>}
-                          </td>
+                          <td className="td-amount" style={{fontWeight:700,color:'var(--red)'}}>€{fmt(e.amount)}</td>
+                          <td><button className="btn btn-danger btn-sm" onClick={()=>delExpense(e.id)}>🗑</button></td>
                         </tr>
                       );
                     })}
@@ -4493,49 +4330,38 @@ function Troskovi({ data, salonId, onRefresh }) {
         <div className="card">
           <div className="card-title">💰 Prihodi vs. Troškovi — zadnjih 12 mjeseci</div>
           <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-              <colgroup>
-                <col style={{width:'15%'}}/>
-                <col style={{width:'22%'}}/>
-                <col style={{width:'22%'}}/>
-                <col style={{width:'22%'}}/>
-                <col style={{width:'19%'}}/>
-              </colgroup>
+            <table>
               <thead>
                 <tr>
-                  <th style={{padding:'10px 14px',textAlign:'left',background:'#1A2B3C',color:'#fff',fontWeight:700,fontSize:12,textTransform:'uppercase'}}>Mjesec</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',background:'#1A2B3C',color:'#69F0AE',fontWeight:700,fontSize:12,textTransform:'uppercase'}}>Prihodi (€)</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',background:'#1A2B3C',color:'#FF6B6B',fontWeight:700,fontSize:12,textTransform:'uppercase'}}>Troškovi (€)</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',background:'#1A2B3C',color:'#fff',fontWeight:700,fontSize:12,textTransform:'uppercase'}}>Neto zarada (€)</th>
-                  <th style={{padding:'10px 14px',textAlign:'right',background:'#1A2B3C',color:'#D4AF37',fontWeight:700,fontSize:12,textTransform:'uppercase'}}>Marža</th>
+                  <th>Mjesec</th>
+                  <th style={{textAlign:'right',color:'var(--green)'}}>Prihodi (€)</th>
+                  <th style={{textAlign:'right',color:'var(--red)'}}>Troškovi (€)</th>
+                  <th style={{textAlign:'right'}}>Neto zarada (€)</th>
+                  <th style={{textAlign:'right'}}>Marža</th>
                 </tr>
               </thead>
               <tbody>
-                {monthlyData.map((m,i)=>{
-                  const tdBase = {padding:'9px 14px',borderBottom:'1px solid var(--border)'};
-                  const rowBg = m.month===fMonth ? 'var(--teal-l)' : i%2===1 ? '#FAFAFA' : '#fff';
-                  return (
-                  <tr key={m.month} style={{background:rowBg,fontWeight:m.month===fMonth?700:400}}>
-                    <td style={{...tdBase,fontWeight:600,whiteSpace:'nowrap'}}>{monthName(m.month)}</td>
-                    <td style={{...tdBase,textAlign:'right',color:'var(--green)',fontWeight:600}}>€{fmt(m.revenue)}</td>
-                    <td style={{...tdBase,textAlign:'right',color:m.expenses>0?'var(--red)':'#aaa'}}>{m.expenses>0?`€${fmt(m.expenses)}`:'—'}</td>
-                    <td style={{...tdBase,textAlign:'right',fontWeight:700,color:m.profit>=0?'var(--teal)':'var(--red)'}}>
+                {monthlyData.map((m,i)=>(
+                  <tr key={m.month} className={m.month===fMonth?'':i%2===1?'tr-alt':''} style={m.month===fMonth?{background:'var(--teal-l)',fontWeight:700}:{}}>
+                    <td style={{fontWeight:600,whiteSpace:'nowrap'}}>{monthName(m.month)}</td>
+                    <td className="td-amount" style={{color:'var(--green)'}}>€{fmt(m.revenue)}</td>
+                    <td className="td-amount" style={{color:'var(--red)'}}>€{fmt(m.expenses)}</td>
+                    <td className="td-amount" style={{fontWeight:700,color:m.profit>=0?'var(--teal)':'var(--red)'}}>
                       {m.profit>=0?'+':''}€{fmt(m.profit)}
                     </td>
-                    <td style={{...tdBase,textAlign:'right',fontSize:13,color:m.revenue>0?(m.profit>=0?'var(--green)':'var(--red)'):'#aaa'}}>
+                    <td style={{textAlign:'right',fontSize:13,color:m.profit>=0?'var(--green)':'var(--red)'}}>
                       {m.revenue>0 ? `${fmt(m.profit/m.revenue*100)}%` : '—'}
                     </td>
                   </tr>
-                  );
-                })}
-                <tr style={{background:'#1A2B3C',color:'#fff',fontWeight:700}}>
-                  <td style={{padding:'11px 14px',fontSize:13}}>UKUPNO</td>
-                  <td style={{padding:'11px 14px',textAlign:'right',color:'#D4AF37',fontSize:14}}>€{fmt(monthlyData.reduce((s,m)=>s+m.revenue,0))}</td>
-                  <td style={{padding:'11px 14px',textAlign:'right',color:'#FF6B6B',fontSize:14}}>€{fmt(monthlyData.reduce((s,m)=>s+m.expenses,0))}</td>
-                  <td style={{padding:'11px 14px',textAlign:'right',fontSize:14,color:monthlyData.reduce((s,m)=>s+m.profit,0)>=0?'#69F0AE':'#FF6B6B'}}>
-                    {monthlyData.reduce((s,m)=>s+m.profit,0)>=0?'+':''}€{fmt(Math.abs(monthlyData.reduce((s,m)=>s+m.profit,0)))}
+                ))}
+                <tr style={{background:'var(--dark)',color:'#fff',fontWeight:700}}>
+                  <td>UKUPNO</td>
+                  <td style={{textAlign:'right',color:'var(--gold)'}}>€{fmt(monthlyData.reduce((s,m)=>s+m.revenue,0))}</td>
+                  <td style={{textAlign:'right',color:'#FF6B6B'}}>€{fmt(monthlyData.reduce((s,m)=>s+m.expenses,0))}</td>
+                  <td style={{textAlign:'right',color:monthlyData.reduce((s,m)=>s+m.profit,0)>=0?'#69F0AE':'#FF6B6B'}}>
+                    €{fmt(monthlyData.reduce((s,m)=>s+m.profit,0))}
                   </td>
-                  <td style={{padding:'11px 14px',textAlign:'right',color:'#888'}}>—</td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>
@@ -5305,7 +5131,7 @@ function App({ initialData }) {
         {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='skladiste'   && <Skladiste   data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
-        {tab==='provjera'    && <Provjera    data={data} salonId={salonId} onRefresh={refresh}/>}
+        {tab==='provjera'    && <Provjera    data={data} salonId={salonId}/>}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
