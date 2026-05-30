@@ -3458,7 +3458,14 @@ const EXPENSE_CATEGORIES = ['PLAĆA','FIKSNI TROŠKOVI','MATERIJAL','MARKETING',
 const EXPENSE_CAT_COLORS = {'PLAĆA':'#E74C3C','FIKSNI TROŠKOVI':'#E67E22','MATERIJAL':'#3498DB','MARKETING':'#9B59B6','EDUKACIJA':'#1ABC9C','OSTALO':'#95A5A6'};
 
 // ─── Provjera prometa ─────────────────────────────────────────────────────
-function Provjera({ data, salonId }) {
+function Provjera({ data, salonId, saveData, onRefresh }) {
+  const addExpense = (name, amount, label) => {
+    if (!saveData || !onRefresh) return;
+    if (!confirm(`Dodaj ${label} (€${amount.toFixed(2)}) u troškove?`)) return;
+    const e = {id:uid(),category:'ISPLATE',subcategory:label,amount:Math.round(amount*100)/100,note:name,type:'varijabilni',dobavljac:'',createdAt:new Date().toISOString()};
+    const nd = {...data,expenses:[...(data.expenses||[]),e]};
+    saveData(nd); onRefresh(nd);
+  };
   const now2 = new Date();
   const thisMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
   const prevMonthDate = new Date(now2.getFullYear(), now2.getMonth()-1, 1);
@@ -3671,8 +3678,7 @@ function Provjera({ data, salonId }) {
         (data.staff||[]).forEach(s=>{ staffRoleMap[(s.name||'').toUpperCase().trim()] = s.role||'djelatnica'; });
         const bonusTotals = {};
         entries.forEach(e=>{
-          const pay = (e.payment||'').toUpperCase().trim();
-          if (!bonusPayments.has(pay)) return;
+          if (hiddenPayments.has(normPayment(e.payment))) return;
           const st = normSt(e.staff);
           bonusTotals[st] = (bonusTotals[st]||0) + (e.total||0);
         });
@@ -3723,6 +3729,9 @@ function Provjera({ data, salonId }) {
                             <td style={{padding:'9px 12px',textAlign:'right',fontWeight:800,color:bonus>0?'var(--gold)':'#aaa',background:'#FFF9E6'}}>
                               {bonus>0 ? `€${fmt(bonus)}` : '—'}
                             </td>
+                            <td style={{padding:'9px 8px',textAlign:'center'}}>
+                              {bonus>0 && <button onClick={()=>addExpense(st,bonus,`Bonus ${st}`)} style={{fontSize:11,padding:'3px 8px',background:'#E65100',color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>+ Trošak</button>}
+                            </td>
                           </tr>
                         );
                       })}
@@ -3735,6 +3744,7 @@ function Provjera({ data, salonId }) {
                         <td style={{padding:'10px 12px',textAlign:'right',fontWeight:800,color:'var(--gold)',fontSize:14,background:'rgba(212,175,55,0.15)'}}>
                           €{fmt(djelatnice.reduce((s,st)=>s+calcBonus(bonusTotals[st]||0),0))}
                         </td>
+                        <td style={{padding:'10px 12px'}}></td>
                       </tr>
                     </tbody>
                   </table>
@@ -3759,6 +3769,7 @@ function Provjera({ data, salonId }) {
                         <th style={thA}>Ukupni promet</th>
                         <th style={thA}>Stopa</th>
                         <th style={{...thA,color:'#E65100',background:'#FFF3E0'}}>Isplata (€)</th>
+                        <th style={thA}></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3771,6 +3782,9 @@ function Provjera({ data, salonId }) {
                             <td style={{padding:'9px 12px',textAlign:'right',color:'var(--teal)',fontWeight:600}}>€{fmt(total)}</td>
                             <td style={{padding:'9px 12px',textAlign:'right',color:'#888',fontWeight:600}}>15%</td>
                             <td style={{padding:'9px 12px',textAlign:'right',fontWeight:800,color:'#E65100',background:'#FFF3E0'}}>€{fmt(isplata)}</td>
+                            <td style={{padding:'9px 8px',textAlign:'center'}}>
+                              {isplata>0 && <button onClick={()=>addExpense(st,isplata,`Isplata ${st}`)} style={{fontSize:11,padding:'3px 8px',background:'#E65100',color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>+ Trošak</button>}
+                            </td>
                           </tr>
                         );
                       })}
@@ -3783,6 +3797,7 @@ function Provjera({ data, salonId }) {
                         <td style={{padding:'10px 12px',textAlign:'right',fontWeight:800,color:'#E65100',fontSize:14,background:'rgba(230,81,0,0.1)'}}>
                           €{fmt(praktikantice.reduce((s,st)=>s+(bonusTotals[st]||0)*0.15,0))}
                         </td>
+                        <td style={{padding:'10px 12px'}}></td>
                       </tr>
                     </tbody>
                   </table>
@@ -3820,6 +3835,7 @@ function Provjera({ data, salonId }) {
                           <th style={thA}>Br. paketa</th>
                           <th style={thA}>Iznos (€)</th>
                           <th style={{...thA,color:'#1565C0',background:'#E3F2FD'}}>Provizija 15% (€)</th>
+                          <th style={thA}></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3836,6 +3852,9 @@ function Provjera({ data, salonId }) {
                                 color:hasBonus?'#1565C0':'#bbb',background:hasBonus?'#E3F2FD':'#F9F9F9'}}>
                                 {hasBonus ? `€${fmt(provizija)}` : <span title="Promet ispod 4.000€">—</span>}
                               </td>
+                              <td style={{padding:'9px 8px',textAlign:'center'}}>
+                                {hasBonus && provizija>0 && <button onClick={()=>addExpense(st,provizija,`Provizija paketi ${st}`)} style={{fontSize:11,padding:'3px 8px',background:'#1565C0',color:'#fff',border:'none',borderRadius:4,cursor:'pointer'}}>+ Trošak</button>}
+                              </td>
                             </tr>
                           );
                         })}
@@ -3846,6 +3865,7 @@ function Provjera({ data, salonId }) {
                           <td style={{padding:'10px 12px',textAlign:'right',fontWeight:800,color:'#90CAF9',fontSize:14,background:'rgba(21,101,192,0.15)'}}>
                             €{fmt(paketStaff.reduce((s,st)=>(bonusTotals[st]||0)>4000?s+paketData[st].total*0.15:s,0))}
                           </td>
+                          <td style={{padding:'10px 12px'}}></td>
                         </tr>
                       </tbody>
                     </table>
@@ -5131,7 +5151,7 @@ function App({ initialData }) {
         {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='skladiste'   && <Skladiste   data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
-        {tab==='provjera'    && <Provjera    data={data} salonId={salonId}/>}
+        {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
