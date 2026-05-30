@@ -3678,7 +3678,8 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
         (data.staff||[]).forEach(s=>{ staffRoleMap[(s.name||'').toUpperCase().trim()] = s.role||'djelatnica'; });
         const bonusTotals = {};
         entries.forEach(e=>{
-          if (hiddenPayments.has(normPayment(e.payment))) return;
+          const pay = normPayment(e.payment)||'';
+          if (!bonusPayments.has(pay)) return;
           const st = normSt(e.staff);
           bonusTotals[st] = (bonusTotals[st]||0) + (e.total||0);
         });
