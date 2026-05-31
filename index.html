@@ -806,18 +806,20 @@ function Statistike({ data, salonId }) {
     return base;
   }, [base, period, customFrom, customTo]);
 
-  const total = filtered.reduce((s,e)=>s+e.total,0);
-  const count = filtered.length;
+  const EXCLUDE_FROM_STATS = new Set(['IZ PAKETA','POKLON BON-odrađeno']);
+  const statFiltered = filtered.filter(e=>!EXCLUDE_FROM_STATS.has(normPayment(e.payment)));
+  const total = statFiltered.reduce((s,e)=>s+e.total,0);
+  const count = statFiltered.length;
   const avg   = count ? total/count : 0;
 
   const salonsRev = data.salons.map(s=>({
     ...s,
-    rev:   filtered.filter(e=>e.salon===s.id).reduce((x,e)=>x+e.total,0),
-    count: filtered.filter(e=>e.salon===s.id).length,
+    rev:   statFiltered.filter(e=>e.salon===s.id).reduce((x,e)=>x+e.total,0),
+    count: statFiltered.filter(e=>e.salon===s.id).length,
   }));
 
   const svcMap = {};
-  filtered.forEach(e=>{svcMap[e.service]=(svcMap[e.service]||0)+e.total;});
+  statFiltered.forEach(e=>{svcMap[e.service]=(svcMap[e.service]||0)+e.total;});
   const topSvc = Object.entries(svcMap).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
   // Helper: normalize staff name to uppercase
