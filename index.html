@@ -3538,14 +3538,15 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
 
   const dates = Object.keys(pivot).sort().reverse();
 
+  const PROVJERA_EXCLUDE = new Set(['IZ PAKETA','POKLON BON-odrađeno']);
   const grandTotals = useMemo(()=>{
     const t={};
     entries.forEach(e=>{
-      if (hiddenPayments.has(normPayment(e.payment))) return;
+      if (PROVJERA_EXCLUDE.has(normPayment(e.payment))) return;
       const st=normSt(e.staff); t[st]=(t[st]||0)+(e.total||0);
     });
     return t;
-  }, [entries, hiddenPayments]);
+  }, [entries]);
 
   const paymentOrder = useMemo(()=>{
     const cnt={};
