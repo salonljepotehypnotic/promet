@@ -589,7 +589,11 @@ function NoviUnos({ data, salonId, onRefresh }) {
           </div>
           <div className="form-group wide">
             <label>📝 Napomena</label>
-            <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..." />
+            <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..."
+                list="note-opts" autoComplete="off" />
+              <datalist id="note-opts">
+                {allNotes.map((n,i)=><option key={i} value={n}/>)}
+              </datalist>
           </div>
         </div>
         <div style={{marginTop:20,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
@@ -618,13 +622,15 @@ function Pregled({ data, salonId, onRefresh }) {
   const [editId,  setEditId]  = useState(null);
   const [editRow, setEditRow] = useState(null);
   const [page,    setPage]    = useState(1);
+  const [fPayment,setFPayment]= useState('');
   const PAGE_SIZE = 50;
 
   const filtered = useMemo(() => {
     let rows = data.entries.filter(e => {
       if (fSalon && e.salon!==fSalon) return false;
       if (e.date < fFrom || e.date > fTo) return false;
-      if (search && !(e.clientName+' '+e.service+' '+e.staff).toLowerCase().includes(search.toLowerCase())) return false;
+      if (fPayment && (e.payment||'')!==fPayment) return false;
+      if (search && !(e.clientName+' '+e.service+' '+e.staff+' '+(e.payment||'')).toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
     rows.sort((a,b) => {
@@ -694,6 +700,12 @@ function Pregled({ data, salonId, onRefresh }) {
           )}
           <input placeholder="🔍 Pretraži..." value={search}
             onChange={e=>{setSearch(e.target.value);setPage(1);}} style={{minWidth:160}} />
+          <select value={fPayment} onChange={e=>{setFPayment(e.target.value);setPage(1);}} style={{minWidth:140}}>
+            <option value="">Svi načini plaćanja</option>
+            {[...new Set(data.entries.map(e=>e.payment||'').filter(Boolean))].sort().map(p=>(
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
           <span style={{marginLeft:'auto',fontWeight:700,color:'var(--green)',fontSize:14}}>
             {filtered.length} unosa · €{fmt(totalRev)}
           </span>
@@ -3469,11 +3481,30 @@ const EXPENSE_CAT_COLORS = {'PLAĆA':'#E74C3C','FIKSNI TROŠKOVI':'#E67E22','MAT
 // ─── Provjera prometa ─────────────────────────────────────────────────────
 function Provjera({ data, salonId, saveData, onRefresh }) {
   const addExpense = (name, amount, label) => {
-    if (!saveData || !onRefresh) return;
-    if (!confirm(`Dodaj ${label} (€${amount.toFixed(2)}) u troškove?`)) return;
-    const e = {id:uid(),date:today(),salonId:salonId==='all'?'':salonId,category:'ISPLATE',subcategory:label,amount:Math.round(amount*100)/100,note:name,type:'varijabilni',dobavljac:'',createdAt:new Date().toISOString()};
-    const nd = {...data,expenses:[...(data.expenses||[]),e]};
-    saveData(nd); onRefresh(nd);
+    if (!saveData || !onRefresh) { alert('Greška: funkcija spremanja nije dostupna.'); return; }
+    if (!(amount > 0)) { alert('Iznos mora biti veći od 0.'); return; }
+    if (!confirm(`Dodaj "${label}" (€${amount.toFixed(2)}) u troškove?`)) return;
+    // Determine which salon to assign the expense to
+    const expSalonId = salonId==='all'
+      ? (data.salons[0]?.id||'') // admin: first salon as default, user can edit in Troškovi
+      : salonId;
+    const e = {
+      id:uid(),
+      date:today(),
+      salonId:expSalonId,
+      category:'ISPLATE',
+      subcategory:label,
+      amount:Math.round(amount*100)/100,
+      note:name,
+      type:'varijabilni',
+      dobavljac:'',
+      createdAt:new Date().toISOString()
+    };
+    const nd = {...data, expenses:[...(data.expenses||[]), e]};
+    saveData(nd);
+    onRefresh(nd);
+    // Small visual feedback
+    alert(`✅ Dodano: "${label}" (€${e.amount.toFixed(2)}) u troškove za ${new Date().toLocaleDateString('hr-HR')}.`);
   };
   const now2 = new Date();
   const thisMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
@@ -4176,6 +4207,11 @@ function Troskovi({ data, salonId, onRefresh }) {
     supplierMap[e.dobavljac] = (supplierMap[e.dobavljac]||0) + e.amount;
   });
 
+  // Autocomplete lists from ALL past expenses
+  const allDobavljaci = useMemo(() => [...new Set(expenses.filter(e=>e.dobavljac).map(e=>e.dobavljac))].sort(), [expenses]);
+  const allNotes      = useMemo(() => [...new Set(expenses.filter(e=>e.note).map(e=>e.note))].sort(), [expenses]);
+  const allSubcats    = useMemo(() => [...new Set(expenses.filter(e=>e.subcategory).map(e=>e.subcategory))].sort(), [expenses]);
+
   // Monthly profit overview (last 12 months)
   const months = useMemo(() => {
     const allMonths = new Set([
@@ -4269,7 +4305,11 @@ function Troskovi({ data, salonId, onRefresh }) {
             <div className="form-group">
               <label>📝 Opis</label>
               <input value={form.subcategory} onChange={e=>set('subcategory',e.target.value)}
-                placeholder="npr. Najam prostora, Plaća-Ana..." />
+                placeholder="npr. Najam prostora, Plaća-Ana..."
+                list="sub-opts" autoComplete="off" />
+              <datalist id="sub-opts">
+                {allSubcats.map((s,i)=><option key={i} value={s}/>)}
+              </datalist>
             </div>
             <div className="form-group">
               <label>💶 Iznos (€)</label>
@@ -4279,7 +4319,11 @@ function Troskovi({ data, salonId, onRefresh }) {
             <div className="form-group">
               <label>🏭 Dobavljač / Firma</label>
               <input value={form.dobavljac} onChange={e=>set('dobavljac',e.target.value)}
-                placeholder="npr. L'Oréal, OTP banka, Ivan Perić..." />
+                placeholder="npr. L'Oréal, OTP banka, Ivan Perić..."
+                list="dob-opts" autoComplete="off" />
+              <datalist id="dob-opts">
+                {allDobavljaci.map((d,i)=><option key={i} value={d}/>)}
+              </datalist>
             </div>
             <div className="form-group wide">
               <label>📎 Napomena</label>
