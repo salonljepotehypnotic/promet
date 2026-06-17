@@ -179,7 +179,7 @@ function mergeWithFirebase(fbData) {
     config:          fbData.config          || SEED.config,
     inventory:       fbObjToArr(fbData.inventory),
     stock:           fbData.stock           || {},
-    consumptions:    fbData.consumptions    || {},
+    consumptions:    decConsumptions(fbData.consumptions),
     prometPayments:  fbData.prometPayments  || DEFAULT_PROMET_PAYMENTS,
     clients:         allClients,
     expenses:        fbObjToArr(fbData.expenses),
@@ -221,6 +221,13 @@ function toFbObj(arr) {
 // Save data: write compact subset to localStorage + full data to Firebase
 // We exclude SEED entries and SEED clients from localStorage to avoid QuotaExceededError
 // (SEED data is already embedded in the HTML and doesn't need caching)
+
+// Firebase ne prihvaća . # $ / [ ] u ključevima → kodiramo ih
+const encFbKey = k => String(k).replace(/[.#$\/\[\]%]/g, c => '%' + c.charCodeAt(0).toString(16).padStart(2,'0').toUpperCase());
+const decFbKey = k => String(k).replace(/%([0-9A-F]{2})/gi, (m,h) => String.fromCharCode(parseInt(h,16)));
+const encConsumptions = obj => { const r={}; Object.entries(obj||{}).forEach(([k,v])=>{ r[encFbKey(k)]=v; }); return r; };
+const decConsumptions = obj => { const r={}; Object.entries(obj||{}).forEach(([k,v])=>{ r[decFbKey(k)]=v; }); return r; };
+
 function saveData(data) {
   try {
     const compactEntries = (data.entries||[]).filter(e => !SEED_ENTRY_IDS.has(e.id));
@@ -242,7 +249,7 @@ function saveData(data) {
     config:          data.config,
     inventory:       toFbObj(data.inventory),
     stock:           data.stock  || {},
-    consumptions:    data.consumptions || {},
+    consumptions:    encConsumptions(data.consumptions),
     prometPayments:  data.prometPayments || DEFAULT_PROMET_PAYMENTS,
     clients:         toFbObj(data.clients),
     expenses:        toFbObj(data.expenses),
