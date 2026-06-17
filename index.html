@@ -589,11 +589,7 @@ function NoviUnos({ data, salonId, onRefresh }) {
           </div>
           <div className="form-group wide">
             <label>📝 Napomena</label>
-            <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..."
-                list="note-opts" autoComplete="off" />
-              <datalist id="note-opts">
-                {allNotes.map((n,i)=><option key={i} value={n}/>)}
-              </datalist>
+            <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..." />
           </div>
         </div>
         <div style={{marginTop:20,display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
@@ -4327,7 +4323,11 @@ function Troskovi({ data, salonId, onRefresh }) {
             </div>
             <div className="form-group wide">
               <label>📎 Napomena</label>
-              <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..." />
+              <input value={form.note} onChange={e=>set('note',e.target.value)} placeholder="opcionalno..."
+                list="note-opts" autoComplete="off" />
+              <datalist id="note-opts">
+                {allNotes.map((n,i)=><option key={i} value={n}/>)}
+              </datalist>
             </div>
           </div>
           <button className="btn btn-primary" style={{marginTop:12}} onClick={handleAdd}>✓ Dodaj trošak</button>
