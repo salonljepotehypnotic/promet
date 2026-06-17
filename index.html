@@ -3471,7 +3471,7 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
   const addExpense = (name, amount, label) => {
     if (!saveData || !onRefresh) return;
     if (!confirm(`Dodaj ${label} (€${amount.toFixed(2)}) u troškove?`)) return;
-    const e = {id:uid(),category:'ISPLATE',subcategory:label,amount:Math.round(amount*100)/100,note:name,type:'varijabilni',dobavljac:'',createdAt:new Date().toISOString()};
+    const e = {id:uid(),date:today(),salonId:salonId==='all'?'':salonId,category:'ISPLATE',subcategory:label,amount:Math.round(amount*100)/100,note:name,type:'varijabilni',dobavljac:'',createdAt:new Date().toISOString()};
     const nd = {...data,expenses:[...(data.expenses||[]),e]};
     saveData(nd); onRefresh(nd);
   };
@@ -4122,14 +4122,14 @@ function Troskovi({ data, salonId, onRefresh }) {
     // Use local getFullYear/getMonth to avoid UTC timezone shift bug
     const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
     const toCopy = expenses.filter(e =>
-      e.date.startsWith(prevMonth) &&
+      (e.date||'').startsWith(prevMonth) &&
       e.type === 'fiksni' &&
       (!fSalon || e.salonId === fSalon)
     );
     if (!toCopy.length) { setToast({msg:`Nema fiksnih troškova u ${prevMonth}!`,type:'error'}); return; }
     const newExp = toCopy.map(e => ({
       ...e, id:uid(),
-      date: fMonth+'-'+e.date.slice(8),
+      date: fMonth+'-'+(e.date||'').slice(8),
       createdAt: new Date().toISOString(),
     }));
     save({...data, expenses:[...expenses, ...newExp]});
@@ -4145,7 +4145,7 @@ function Troskovi({ data, salonId, onRefresh }) {
   const filteredExp = useMemo(() => {
     return expenses.filter(e => {
       if (fSalon && e.salonId !== fSalon) return false;
-      if (fMonth && !e.date.startsWith(fMonth)) return false;
+      if (fMonth && !(e.date||'').startsWith(fMonth)) return false;
       return true;
     });
   }, [expenses, fSalon, fMonth]);
@@ -4154,7 +4154,7 @@ function Troskovi({ data, salonId, onRefresh }) {
   const filteredRev = useMemo(() => {
     return data.entries.filter(e => {
       if (fSalon && e.salon !== fSalon) return false;
-      if (fMonth && !e.date.startsWith(fMonth)) return false;
+      if (fMonth && !(e.date||'').startsWith(fMonth)) return false;
       return true;
     });
   }, [data.entries, fSalon, fMonth]);
@@ -4180,15 +4180,15 @@ function Troskovi({ data, salonId, onRefresh }) {
   const months = useMemo(() => {
     const allMonths = new Set([
       ...data.entries.map(e=>e.date.slice(0,7)),
-      ...expenses.map(e=>e.date.slice(0,7)),
+      ...expenses.map(e=>(e.date||'').slice(0,7)).filter(Boolean),
     ]);
     return [...allMonths].sort().slice(-12);
   }, [data.entries, expenses]);
 
   const monthlyData = useMemo(() => {
     return months.map(m => {
-      const mExpenses = expenses.filter(e=>(fSalon?e.salonId===fSalon:true)&&e.date.startsWith(m)).reduce((s,e)=>s+e.amount,0);
-      const mRevenue  = data.entries.filter(e=>(fSalon?e.salon===fSalon:true)&&e.date.startsWith(m)).reduce((s,e)=>s+e.total,0);
+      const mExpenses = expenses.filter(e=>(fSalon?e.salonId===fSalon:true)&&(e.date||'').startsWith(m)).reduce((s,e)=>s+e.amount,0);
+      const mRevenue  = data.entries.filter(e=>(fSalon?e.salon===fSalon:true)&&(e.date||'').startsWith(m)).reduce((s,e)=>s+e.total,0);
       return { month:m, revenue:mRevenue, expenses:mExpenses, profit:mRevenue-mExpenses };
     });
   }, [months, data.entries, expenses, fSalon]);
