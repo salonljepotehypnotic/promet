@@ -4391,7 +4391,8 @@ function Troskovi({ data, salonId, onRefresh }) {
                     {filteredExp.sort((a,b)=>b.date.localeCompare(a.date)).map((e,i)=>{
                       const sal = data.salons.find(s=>s.id===e.salonId);
                       return (
-                        <tr key={e.id} className={i%2===1?'tr-alt':''}>
+                        <React.Fragment key={e.id}>
+                        <tr className={i%2===1?'tr-alt':''}>
                           <td style={{whiteSpace:'nowrap'}}>{fmtDate(e.date)}</td>
                           <td><span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:e.type==='fiksni'?'#E3F2FD':'#FFF3E0',color:e.type==='fiksni'?'#1565C0':'#E65100'}}>{e.type}</span></td>
                           <td><span style={{fontSize:11,padding:'2px 6px',borderRadius:10,background:(EXPENSE_CAT_COLORS[e.category]||'#888')+'22',color:EXPENSE_CAT_COLORS[e.category]||'#888',fontWeight:700}}>{e.category}</span></td>
@@ -4427,6 +4428,7 @@ function Troskovi({ data, salonId, onRefresh }) {
                             </td>
                           </tr>
                         )}
+                        </React.Fragment>
                       );
                     })}
                     <tr style={{background:'var(--dark)',color:'#fff',fontWeight:700}}>
