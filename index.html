@@ -3484,9 +3484,10 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
     const expSalonId = salonId==='all'
       ? (data.salons[0]?.id||'') // admin: first salon as default, user can edit in Troškovi
       : salonId;
+    // Use last day of selected period as expense date
     const e = {
       id:uid(),
-      date:today(),
+      date:to,
       salonId:expSalonId,
       category:'ISPLATE',
       subcategory:label,
@@ -4121,7 +4122,8 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
 function Troskovi({ data, salonId, onRefresh }) {
   const [fSalon, setFSalon] = useState(salonId==='all'?'':salonId);
   const [fMonth, setFMonth] = useState(today().slice(0,7));
-  const [view, setView] = useState('unos'); // unos | pregled | profit
+  const [view, setView] = useState('unos');
+  const [copyFromMonth, setCopyFromMonth] = useState(''); // unos | pregled | profit
   const [form, setForm] = useState({
     salonId: salonId==='all'?(data.salons[0]?.id||'savska'):salonId,
     date: today(), category: 'FIKSNI TROŠKOVI', subcategory: '', amount: '', note: '', type: 'fiksni', dobavljac: '',
@@ -4144,28 +4146,35 @@ function Troskovi({ data, salonId, onRefresh }) {
 
   const copyFixedCosts = () => {
     if (!fMonth) { setToast({msg:'Odaberite ciljni mjesec!',type:'error'}); return; }
-    const [y,m] = fMonth.split('-').map(Number);
-    const prevDate = new Date(y, m-2, 1);
-    // Use local getFullYear/getMonth to avoid UTC timezone shift bug
-    const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
+    if (!copyFromMonth) { setToast({msg:'Odaberite izvorni mjesec za kopiranje!',type:'error'}); return; }
+    const srcMonth = copyFromMonth;
     const toCopy = expenses.filter(e =>
-      (e.date||'').startsWith(prevMonth) &&
+      (e.date||'').startsWith(srcMonth) &&
       e.type === 'fiksni' &&
       (!fSalon || e.salonId === fSalon)
     );
-    if (!toCopy.length) { setToast({msg:`Nema fiksnih troškova u ${prevMonth}!`,type:'error'}); return; }
+    if (!toCopy.length) { setToast({msg:`Nema fiksnih troškova u ${srcMonth}!`,type:'error'}); return; }
     const newExp = toCopy.map(e => ({
       ...e, id:uid(),
       date: fMonth+'-'+(e.date||'').slice(8),
       createdAt: new Date().toISOString(),
     }));
     save({...data, expenses:[...expenses, ...newExp]});
-    setToast({msg:`Kopirano ${newExp.length} fiksnih troškova iz ${prevMonth}!`});
+    setToast({msg:`Kopirano ${newExp.length} fiksnih troškova iz ${srcMonth} u ${fMonth}!`});
   };
 
   const delExpense = id => {
     if (!confirm('Obriši trošak?')) return;
     save({...data, expenses:expenses.filter(e=>e.id!==id)});
+  };
+
+  const startEdit = (e) => { setEditId(e.id); setEditRow({...e}); };
+  const cancelEdit = () => { setEditId(null); setEditRow(null); };
+  const saveEditExp = () => {
+    if (!editRow.amount || !editRow.category) { setToast({msg:'Unesite iznos i kategoriju!',type:'error'}); return; }
+    const updated = expenses.map(e => e.id===editId ? {...editRow, amount:parseFloat(editRow.amount)||0} : e);
+    save({...data, expenses:updated});
+    setEditId(null); setEditRow(null);
   };
 
   // Filtered expenses for selected month/salon
@@ -4338,10 +4347,16 @@ function Troskovi({ data, salonId, onRefresh }) {
         <div className="card">
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:12}}>
             <div className="card-title" style={{marginBottom:0}}>📋 Troškovi — {fMonth ? `${MONTH_NAMES[parseInt(fMonth.split('-')[1])]} ${fMonth.split('-')[0]}` : 'Sve'}</div>
-            <button className="btn btn-sm btn-outline" style={{color:'#E67E22',borderColor:'#E67E22'}} onClick={copyFixedCosts}
-              title="Kopira sve fiksne troškove iz prošlog mjeseca u odabrani trenutni mjesec">
-              📋 Kopiraj fiksne troškove iz prošlog mj.
-            </button>
+            <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+              <label style={{fontSize:12,color:'#666',fontWeight:600}}>Kopiraj fiksne iz:</label>
+              <input type="month" value={copyFromMonth} onChange={e=>setCopyFromMonth(e.target.value)}
+                style={{fontSize:12,padding:'3px 6px',border:'1px solid #ddd',borderRadius:4}} />
+              <button className="btn btn-sm btn-outline" style={{color:'#E67E22',borderColor:'#E67E22'}} onClick={copyFixedCosts}
+                title="Kopira sve fiksne troškove iz odabranog mjeseca u trenutno odabrani ciljni mjesec"
+                disabled={!copyFromMonth}>
+                📋 Kopiraj fiksne troškove
+              </button>
+            </div>
           </div>
           {filteredExp.length === 0 ? (
             <p style={{color:'#aaa',textAlign:'center',padding:24}}>Nema troškova za odabrani period.</p>
@@ -4384,8 +4399,34 @@ function Troskovi({ data, salonId, onRefresh }) {
                           <td style={{fontSize:12,color:'#555'}}>{e.dobavljac||'—'}</td>
                           {salonId==='all'&&<td style={{fontSize:12}}>{sal?.name||e.salonId}</td>}
                           <td className="td-amount" style={{fontWeight:700,color:'var(--red)'}}>€{fmt(e.amount)}</td>
-                          <td><button className="btn btn-danger btn-sm" onClick={()=>delExpense(e.id)}>🗑</button></td>
+                          <td style={{display:'flex',gap:4,flexWrap:'nowrap'}}>
+                            <button className="btn btn-sm" style={{background:'#1565C0',color:'#fff',border:'none'}} onClick={()=>startEdit(e)} title="Uredi">✏️</button>
+                            <button className="btn btn-danger btn-sm" onClick={()=>delExpense(e.id)} title="Obriši">🗑</button>
+                          </td>
                         </tr>
+                        {editId===e.id && editRow && (
+                          <tr style={{background:'#fffde7'}}>
+                            <td colSpan={salonId==='all'?8:7} style={{padding:'10px 8px'}}>
+                              <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center'}}>
+                                <input type="date" value={editRow.date||''} onChange={ev=>setEditRow(r=>({...r,date:ev.target.value}))} style={{fontSize:12}} />
+                                <select value={editRow.category||''} onChange={ev=>setEditRow(r=>({...r,category:ev.target.value}))} style={{fontSize:12}}>
+                                  {['FIKSNI TROŠKOVI','VARIJABILNI TROŠKOVI','ISPLATE','OSTALO'].map(c=><option key={c} value={c}>{c}</option>)}
+                                </select>
+                                <input value={editRow.subcategory||''} onChange={ev=>setEditRow(r=>({...r,subcategory:ev.target.value}))} placeholder="Opis" style={{fontSize:12,minWidth:120}} list="edit-sub-opts" />
+                                <datalist id="edit-sub-opts">{allSubcats.map((s,i)=><option key={i} value={s}/>)}</datalist>
+                                <input value={editRow.dobavljac||''} onChange={ev=>setEditRow(r=>({...r,dobavljac:ev.target.value}))} placeholder="Dobavljač" style={{fontSize:12,minWidth:100}} list="edit-dob-opts" />
+                                <datalist id="edit-dob-opts">{allDobavljaci.map((d,i)=><option key={i} value={d}/>)}</datalist>
+                                <input value={editRow.note||''} onChange={ev=>setEditRow(r=>({...r,note:ev.target.value}))} placeholder="Napomena" style={{fontSize:12,minWidth:100}} />
+                                {salonId==='all' && <select value={editRow.salonId||''} onChange={ev=>setEditRow(r=>({...r,salonId:ev.target.value}))} style={{fontSize:12}}>
+                                  {data.salons.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                                </select>}
+                                <input type="number" value={editRow.amount||''} onChange={ev=>setEditRow(r=>({...r,amount:ev.target.value}))} placeholder="Iznos" style={{fontSize:12,width:80}} />
+                                <button className="btn btn-primary btn-sm" onClick={saveEditExp}>💾 Spremi</button>
+                                <button className="btn btn-sm" style={{background:'#eee'}} onClick={cancelEdit}>✕</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                       );
                     })}
                     <tr style={{background:'var(--dark)',color:'#fff',fontWeight:700}}>
