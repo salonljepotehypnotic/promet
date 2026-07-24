@@ -164,7 +164,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[] };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[] };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -210,6 +210,7 @@ function mergeWithFirebase(fbData) {
     toolAssignments: fbObjToArr(fbData.toolAssignments),
     alatInventar:    fbObjToArr(fbData.alatInventar),
     alatRadovi:      fbObjToArr(fbData.alatRadovi),
+    pointsLedger:    fbObjToArr(fbData.pointsLedger),
   };
 }
 
@@ -280,6 +281,7 @@ function saveData(data) {
     toolAssignments: toFbObj(data.toolAssignments),
     alatInventar:    toFbObj(data.alatInventar),
     alatRadovi:      toFbObj(data.alatRadovi),
+    pointsLedger:    toFbObj(data.pointsLedger),
   };
   // Use update() to avoid overwriting inventory/consumptions with empty values
   __db.ref(FB_PATH).update(fbData).catch(err => console.warn('Firebase save error:', err));
@@ -326,6 +328,27 @@ function autoReferralStatus(refClient){
   return 'neaktivna';
 }
 const effReferralStatus = c => (c && c.referralStatus && c.referralStatus.trim()) ? c.referralStatus : autoReferralStatus(c);
+
+// ── Faza 3 — bodovi (konfigurabilno, ništa "zakovano") ────────────────────
+const DEFAULT_LOYALTY = {
+  enabled: false,                 // glavni prekidač — dok admin ne uključi, ništa se ne dodjeljuje automatski
+  eurPerPoint: 10,                // 1 bod za svakih X € potrošnje
+  referralFirstVisit: 50,         // bodovi kad preporučena odradi i plati 1. termin
+  referralThirdVisit: 50,         // dodatni bodovi nakon N-tog plaćenog posjeta preporučene
+  referralThirdVisitAt: 3,        // prag posjeta za drugi bonus
+  referralSpendEurPerPoint: 10,   // 1 bod za svakih X € potrošnje preporučene (prvih N mj.)
+  referralSpendMonths: 12,
+  ruleSpend: true, ruleReferralFirst: true, ruleReferralThird: true, ruleReferralSpend: false,
+  expiryMonths: 12,               // rok neiskorištenih bodova (mjeseci)
+};
+const getLoyalty = data => ({...DEFAULT_LOYALTY, ...((data && data.config && data.config.loyalty) || {})});
+// Saldo bodova klijentice = zbroj svih promjena u evidenciji
+const pointsBalance = (ledger, clientId) => (ledger||[]).filter(l=>l.clientId===clientId).reduce((s,l)=>s+(l.delta||0),0);
+// Zapis u evidenciju bodova (append-only)
+const makeLedgerEntry = ({clientId, delta, reason, kind, ref, by, balanceAfter}) => ({
+  id: uid(), clientId, delta, reason: reason||'', kind: kind||'manual', ref: ref||'',
+  by: by||'', date: new Date().toISOString(), balanceAfter,
+});
 
 // Normalize payment type names to canonical form (fixes case/spacing variants)
 const normPayment = p => {
@@ -2559,6 +2582,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
   });
 
   const save = d => { saveData(d); onRefresh(d); setToast({msg:'Promjene spremljene!'}); };
+  const [loyaltyDraft, setLoyaltyDraft] = useState(null); // radna kopija pravila bodova
 
   const savePins = () => {
     const cur = JSON.parse(localStorage.getItem('hypnotic_pins')||'{}');
@@ -2692,7 +2716,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
       </div>}
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
         {(isAdmin
-          ? [['pins','🔐 Lozinke'],['salons','🏢 Saloni'],['staff','👩 Djelatnice'],['services','✨ Usluge'],['promet','💰 Promet-plaćanja'],['backup','💾 Backup/Uvoz']]
+          ? [['pins','🔐 Lozinke'],['salons','🏢 Saloni'],['staff','👩 Djelatnice'],['services','✨ Usluge'],['promet','💰 Promet-plaćanja'],['loyalty','⭐ Bodovi'],['backup','💾 Backup/Uvoz']]
           : [['staff','👩 Djelatnice'],['services','✨ Usluge']]
         ).map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${tab===k?'btn-primary':'btn-outline'}`}
@@ -2970,6 +2994,67 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
         </div>
       )}
 
+      {tab==='loyalty' && (()=>{
+        const L = loyaltyDraft || getLoyalty(data);
+        const setL = (k,v) => setLoyaltyDraft({...L, [k]:v});
+        const num = (k) => (
+          <input type="number" value={L[k]} onChange={e=>setL(k, e.target.value===''?'':Number(e.target.value))}
+            style={{width:90,padding:'6px 10px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
+        );
+        const toggle = (k) => (
+          <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+            <input type="checkbox" checked={!!L[k]} onChange={e=>setL(k,e.target.checked)} style={{width:16,height:16}} />
+            <span style={{fontSize:12,color:'#666'}}>uključeno</span>
+          </label>
+        );
+        return (
+        <div className="card">
+          <div className="card-title">⭐ Pravila bodova i nagrađivanja</div>
+          <p style={{fontSize:13,color:'#666',marginBottom:16}}>
+            Sva pravila su ovdje — mijenjaš ih bez diranja koda. Promjena pravila <strong>ne mijenja</strong> već dodijeljene bodove (evidencija ostaje).
+            Automatski obračun po ovim pravilima uključuje se u sljedećem koraku; ovdje ga sada postavljaš.
+          </p>
+
+          <div style={{display:'flex',alignItems:'center',gap:10,background: L.enabled?'#E8F5E9':'#FFF3E0',border:'1.5px solid var(--border)',borderRadius:10,padding:'12px 16px',marginBottom:16}}>
+            <input type="checkbox" checked={!!L.enabled} onChange={e=>setL('enabled',e.target.checked)} style={{width:18,height:18}} />
+            <div>
+              <div style={{fontWeight:700,fontSize:14}}>Bodovni sustav {L.enabled?'UKLJUČEN':'isključen'}</div>
+              <div style={{fontSize:12,color:'#888'}}>Glavni prekidač. Dok je isključen, automatski se ništa ne dodjeljuje (ručna promjena i dalje radi).</div>
+            </div>
+          </div>
+
+          {[
+            ['ruleSpend', '💶 Bodovi za potrošnju', <span>1 bod za svakih {num('eurPerPoint')} € potrošnje</span>],
+            ['ruleReferralFirst', '🤝 Bonus za 1. dolazak preporučene', <span>{num('referralFirstVisit')} bodova kad preporučena odradi i plati 1. termin</span>],
+            ['ruleReferralThird', '🔁 Bonus za lojalnost preporučene', <span>{num('referralThirdVisit')} bodova nakon {num('referralThirdVisitAt')}. plaćenog posjeta preporučene</span>],
+            ['ruleReferralSpend', '📈 Bodovi po potrošnji preporučene', <span>1 bod za svakih {num('referralSpendEurPerPoint')} € potrošnje preporučene, prvih {num('referralSpendMonths')} mj.</span>],
+          ].map(([key,title,body])=>(
+            <div key={key} style={{border:'1.5px solid var(--border)',borderRadius:10,padding:'12px 14px',marginBottom:10,opacity:L[key]?1:0.6}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontWeight:700,fontSize:14}}>{title}</div>
+                {toggle(key)}
+              </div>
+              <div style={{fontSize:13,color:'#444',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>{body}</div>
+            </div>
+          ))}
+
+          <div style={{border:'1.5px solid var(--border)',borderRadius:10,padding:'12px 14px',marginBottom:16}}>
+            <div style={{fontWeight:700,fontSize:14,marginBottom:8}}>⏳ Rok bodova</div>
+            <div style={{fontSize:13,color:'#444',display:'flex',alignItems:'center',gap:6}}>Bodovi vrijede {num('expiryMonths')} mjeseci od zadnje promjene.</div>
+          </div>
+
+          <div style={{fontSize:12,color:'#E67E22',background:'#FFF8E1',borderRadius:8,padding:'10px 12px',marginBottom:16}}>
+            💡 Podsjetnik: dogovoreno je da se popusti <strong>ukidaju</strong>, a nagrada = <strong>gratis tretman</strong> (nikad trepavice/geliranje — one gube na satu). Katalog nagrada slijedi u Fazi 4.
+          </div>
+
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-primary" onClick={()=>{ save({...data, config:{...(data.config||{}), loyalty:{...getLoyalty(data), ...L}}}); setLoyaltyDraft(null); }}>💾 Spremi pravila</button>
+            {loyaltyDraft && <button className="btn btn-sm" style={{background:'#eee'}} onClick={()=>setLoyaltyDraft(null)}>Odustani</button>}
+          </div>
+        </div>
+        );
+      })()}
+
       {tab==='backup' && (
         <div className="card">
           <div className="card-title">💾 Backup, uvoz i odjava</div>
@@ -3063,6 +3148,8 @@ function Klijentice({ data, salonId, onRefresh }) {
   const [hFilter, setHFilter] = useState({q:'', staff:'', from:'', to:''}); // filtri povijesti tretmana
   const [refSearch, setRefSearch] = useState(''); // tražilica preporučitelja
   const [mergeSurvivor, setMergeSurvivor] = useState({}); // {groupKey: survivorId} za spajanje duplikata
+  const [ptDelta, setPtDelta] = useState('');   // ručna promjena bodova
+  const [ptReason, setPtReason] = useState('');
 
   const save = d => { saveData(d); onRefresh(d); setToast({msg:'Promjene spremljene!'}); };
 
@@ -3169,6 +3256,19 @@ function Klijentice({ data, salonId, onRefresh }) {
     const nd = {...data, clients: data.clients.map(c => c.id===clientId ? {...c, referredBy: referrerId||''} : c)};
     save(nd);
     setToast({msg: referrerId ? 'Preporuka povezana!' : 'Preporuka uklonjena.'});
+  };
+
+  // Ručna promjena bodova (samo admin) — upisuje u evidenciju, obavezan razlog
+  const addManualPoints = (clientId, delta, reason) => {
+    const d = Number(delta);
+    if (!d || isNaN(d)) { setToast({msg:'Upiši broj bodova (npr. 50 ili -20).',type:'error'}); return; }
+    if (!reason.trim()) { setToast({msg:'Ručna promjena bodova mora imati razlog.',type:'error'}); return; }
+    const ledger = data.pointsLedger || [];
+    const balanceAfter = pointsBalance(ledger, clientId) + d;
+    const entry = makeLedgerEntry({clientId, delta:d, reason:reason.trim(), kind:'manual', by: salonId==='all'?'admin':salonId, balanceAfter});
+    save({...data, pointsLedger:[...ledger, entry]});
+    setPtDelta(''); setPtReason('');
+    setToast({msg:`Bodovi ${d>0?'dodani':'oduzeti'}: ${d>0?'+':''}${d}`});
   };
 
   // Spajanje duplikata — čuva SVE termine (preko aliasa + preusmjeravanja clientId); ne briše unose
@@ -3697,7 +3797,7 @@ function Klijentice({ data, salonId, onRefresh }) {
 
             {/* Tabovi kartona */}
             <div style={{display:'flex',gap:6,marginBottom:16,borderBottom:'1.5px solid var(--border)',flexWrap:'wrap'}}>
-              {[['osnovni','👤 Osnovni podaci'],['statistika','📊 Statistika'],['povijest',`📋 Povijest (${selEntries.length})`],['preporuke',`🤝 Preporuke (${(referralsOf[selClient.id]||[]).length})`]].map(([k,l])=>(
+              {[['osnovni','👤 Osnovni podaci'],['statistika','📊 Statistika'],['povijest',`📋 Povijest (${selEntries.length})`],['preporuke',`🤝 Preporuke (${(referralsOf[selClient.id]||[]).length})`],['bodovi',`⭐ Bodovi (${pointsBalance(data.pointsLedger, selClient.id)})`]].map(([k,l])=>(
                 <button key={k} onClick={()=>setCardTab(k)}
                   style={{border:'none',background:'none',padding:'8px 12px',fontSize:13,fontWeight:cardTab===k?700:500,
                     color:cardTab===k?'var(--teal)':'#888',borderBottom:cardTab===k?'2.5px solid var(--teal)':'2.5px solid transparent',cursor:'pointer',marginBottom:-1.5}}>
@@ -3921,6 +4021,59 @@ function Klijentice({ data, salonId, onRefresh }) {
                       </tbody>
                     </table>
                     <p style={{fontSize:11,color:'#aaa',marginTop:8}}>Bodovi se obračunavaju od Faze 3 (bodovni sustav). Status se računa automatski iz aktivnosti preporučene klijentice.</p>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
+
+            {/* ── TAB: Bodovi ── */}
+            {cardTab==='bodovi' && (()=>{
+              const ledger = (data.pointsLedger||[]).filter(l=>l.clientId===selClient.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+              const bal = pointsBalance(data.pointsLedger, selClient.id);
+              const isAdmin = salonId==='all';
+              return (
+              <div>
+                <div style={{background:'linear-gradient(135deg,#FFF8E1,#FFECB3)',border:'1.5px solid var(--gold)',borderRadius:12,padding:'14px 18px',marginBottom:16,textAlign:'center'}}>
+                  <div style={{fontSize:12,color:'#856404',fontWeight:600}}>⭐ Trenutačno bodova</div>
+                  <div style={{fontSize:30,fontWeight:800,color:'#B8860B'}}>{bal}</div>
+                </div>
+
+                {isAdmin ? (
+                  <div style={{border:'1.5px solid var(--border)',borderRadius:10,padding:12,marginBottom:16}}>
+                    <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:8}}>✏️ Ručna promjena bodova</div>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                      <input type="number" value={ptDelta} onChange={e=>setPtDelta(e.target.value)} placeholder="npr. 50 ili -20"
+                        style={{width:120,padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
+                      <input value={ptReason} onChange={e=>setPtReason(e.target.value)} placeholder="Razlog (obavezno)..."
+                        style={{flex:'1 1 160px',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
+                      <button className="btn btn-primary btn-sm" onClick={()=>addManualPoints(selClient.id, ptDelta, ptReason)}>Spremi</button>
+                    </div>
+                    <div style={{fontSize:11,color:'#aaa',marginTop:6}}>Pozitivan broj dodaje, negativan oduzima. Svaka promjena ostaje trajno zapisana.</div>
+                  </div>
+                ) : (
+                  <div style={{fontSize:12,color:'#888',marginBottom:12}}>Ručnu promjenu bodova može raditi samo administrator.</div>
+                )}
+
+                <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:8}}>📜 Povijest bodova ({ledger.length})</div>
+                {ledger.length===0 ? (
+                  <p style={{color:'#aaa',fontSize:13}}>Još nema promjena bodova. Automatski obračun (potrošnja, preporuke) uključuje se u sljedećem koraku Faze 3.</p>
+                ) : (
+                  <div style={{overflowX:'auto',maxHeight:320}}>
+                    <table>
+                      <thead><tr><th>Datum</th><th style={{textAlign:'right'}}>Promjena</th><th>Razlog</th><th>Vrsta</th><th style={{textAlign:'right'}}>Stanje</th></tr></thead>
+                      <tbody>
+                        {ledger.map((l,i)=>(
+                          <tr key={l.id} className={i%2===1?'tr-alt':''}>
+                            <td style={{fontSize:11,whiteSpace:'nowrap'}}>{l.date?fmtDate(l.date.slice(0,10)):'—'}</td>
+                            <td style={{textAlign:'right',fontWeight:700,color:(l.delta||0)>=0?'var(--green)':'var(--red)'}}>{(l.delta||0)>=0?'+':''}{l.delta}</td>
+                            <td style={{fontSize:12}}>{l.reason||'—'}</td>
+                            <td><span style={{fontSize:10,background: l.kind==='manual'?'#F3E5F5':'#E0F7F8',color:l.kind==='manual'?'#6A1B9A':'#0D7377',padding:'2px 8px',borderRadius:10}}>{l.kind==='manual'?'ručno'+(l.by?' · '+l.by:''):'auto'}</span></td>
+                            <td style={{textAlign:'right',color:'#666'}}>{l.balanceAfter}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>
