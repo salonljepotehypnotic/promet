@@ -349,6 +349,58 @@ const makeLedgerEntry = ({clientId, delta, reason, kind, ref, by, balanceAfter})
   id: uid(), clientId, delta, reason: reason||'', kind: kind||'manual', ref: ref||'',
   by: by||'', date: new Date().toISOString(), balanceAfter,
 });
+// Isti izuzeci kao za promet (izbjegava dvostruko bodovanje paketa/bonova)
+const POINTS_EXCLUDE = new Set(['IZ PAKETA','POKLON BON-odrađeno']);
+const addMonths = (d,n) => { const [y,m,day]=String(d).split('-').map(Number); const dt=new Date(y,(m-1)+n,day); return dt.toISOString().slice(0,10); };
+
+// Automatski obračun bodova za JEDAN novi unos. Vraća polje novih zapisa u evidenciju (može biti prazno).
+// Idempotentno preko `ref` ključa; unaprijed (samo za nove unose); poštuje glavni prekidač i pojedina pravila.
+function awardPointsForEntry(data, newEntry, client) {
+  const L = getLoyalty(data);
+  if (!L.enabled || !client) return [];
+  const ledger = data.pointsLedger || [];
+  const out = [];
+  const hasRef = ref => !!ref && (ledger.some(l=>l.ref===ref) || out.some(l=>l.ref===ref));
+  const sumRef = ref => ledger.filter(l=>l.ref===ref).reduce((s,l)=>s+(l.delta||0),0) + out.filter(l=>l.ref===ref).reduce((s,l)=>s+(l.delta||0),0);
+  const running = cid => pointsBalance([...ledger, ...out], cid);
+  const push = (cid, delta, reason, ref) => {
+    if (!delta || !cid) return;
+    if (ref && hasRef(ref) && !ref.startsWith('refSpend:')) return; // fiksni bonusi samo jednom
+    out.push(makeLedgerEntry({clientId:cid, delta, reason, kind:'auto', ref, by:'auto', balanceAfter: running(cid)+delta}));
+  };
+  const isPaid = e => !POINTS_EXCLUDE.has(normPayment(e.payment)) && (e.total||0) > 0;
+
+  // 1) Bodovi klijentici za njezinu potrošnju
+  if (L.ruleSpend && L.eurPerPoint>0 && isPaid(newEntry)) {
+    const pts = Math.floor((newEntry.total||0) / L.eurPerPoint);
+    if (pts>0) push(client.id, pts, `Potrošnja €${fmt(newEntry.total)}`, 'spend:'+newEntry.id);
+  }
+
+  // 2) Bodovi preporučiteljici (ako je ova klijentica preporučena)
+  if (client.referredBy) {
+    const keys = clientNameKeys(client);
+    const allEntries = [...data.entries.filter(e=>e.id!==newEntry.id), newEntry]
+      .filter(e => (e.clientId && e.clientId===client.id) || keys.includes(normName(e.clientName||e.client)));
+    const paid = allEntries.filter(isPaid).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    const paidCount = paid.length;
+    if (L.ruleReferralFirst && paidCount>=1 && L.referralFirstVisit>0)
+      push(client.referredBy, L.referralFirstVisit, `Preporuka: ${client.name} — 1. plaćeni dolazak`, 'refFirst:'+client.id);
+    if (L.ruleReferralThird && L.referralThirdVisitAt>0 && paidCount>=L.referralThirdVisitAt && L.referralThirdVisit>0)
+      push(client.referredBy, L.referralThirdVisit, `Preporuka: ${client.name} — ${L.referralThirdVisitAt}. plaćeni posjet`, 'refNth:'+client.id);
+    if (L.ruleReferralSpend && L.referralSpendEurPerPoint>0 && paid.length) {
+      const cutoff = addMonths(paid[0].date, L.referralSpendMonths||12);
+      const eligible = paid.filter(e => (e.date||'') <= cutoff).reduce((s,e)=>s+(e.total||0),0);
+      const totalPts = Math.floor(eligible / L.referralSpendEurPerPoint);
+      const already = sumRef('refSpendTotal:'+client.id);
+      const delta = totalPts - already;
+      if (delta>0) {
+        // ref nosi ukupno da idući put znamo koliko je već dodijeljeno
+        out.push(makeLedgerEntry({clientId:client.referredBy, delta, reason:`Preporuka: ${client.name} — potrošnja`, kind:'auto', ref:'refSpendTotal:'+client.id, by:'auto', balanceAfter: running(client.referredBy)+delta}));
+      }
+    }
+  }
+  return out;
+}
 
 // Normalize payment type names to canonical form (fixes case/spacing variants)
 const normPayment = p => {
@@ -511,7 +563,7 @@ function LoginScreen({ data, onLogin }) {
 }
 
 // ─── Novi unos ────────────────────────────────────────────────────────────
-function NoviUnos({ data, salonId, onRefresh }) {
+function NoviUnos({ data, salonId, onRefresh, activeStaff }) {
   const salon = data.salons.find(s=>s.id===salonId) || data.salons[0];
   const clientNames = useMemo(() =>
     [...new Set(data.entries.filter(e=>!salonId||salonId==='all'||e.salon===salonId).map(e=>e.clientName).filter(Boolean))].sort(),
@@ -595,6 +647,8 @@ function NoviUnos({ data, salonId, onRefresh }) {
     // arrivalSource se ne sprema na unos prometa — samo na karton klijentice
     const { arrivalSource, ...formRest } = form;
     const entry = { id:uid(), ...formRest, clientId: client.id,
+      staff: (formRest.staff||'').trim() || activeStaff || '',
+      enteredBy: activeStaff || '',
       price:parseFloat(form.price)||0, discount:parseFloat(form.discount)||0,
       quantity:parseFloat(form.quantity)||1, total, createdAt: new Date().toISOString() };
 
@@ -613,8 +667,13 @@ function NoviUnos({ data, salonId, onRefresh }) {
       nd = { ...nd, stock: newStock };
     }
 
+    // Automatski bodovi (Faza 3b) — samo za nove unose, poštuje pravila i glavni prekidač
+    const awarded = awardPointsForEntry(nd, entry, client);
+    if (awarded.length) nd = { ...nd, pointsLedger:[...(nd.pointsLedger||[]), ...awarded] };
+    const selfPts = awarded.filter(a=>a.clientId===client.id).reduce((s,a)=>s+(a.delta||0),0);
+
     saveData(nd); onRefresh(nd);
-    setToast({msg:'Unos spremljen! €'+fmt(total)});
+    setToast({msg:`Unos spremljen! €${fmt(total)}${selfPts>0?` · +${selfPts} ⭐`:''}`});
     setStockWarning(null);
     setNewModal(null); setNmRefSearch('');
     setForm(f=>({...f, clientName: keepClient ? f.clientName : '', service:'', price:'', discount:'0', quantity:'1', note:'', arrivalSource:''}));
@@ -840,7 +899,17 @@ function Pregled({ data, salonId, onRefresh }) {
 
   const del = id => {
     if(!confirm('Obriši ovaj unos?')) return;
-    const nd={...data,entries:data.entries.filter(e=>e.id!==id)};
+    let ledger = data.pointsLedger || [];
+    // Poništi automatski dodijeljene bodove vezane uz ovaj unos (potrošnja)
+    const tied = ledger.filter(l => l.ref === ('spend:'+id) && (l.delta||0) !== 0);
+    if (tied.length) {
+      const reversals = tied.map(l => makeLedgerEntry({
+        clientId: l.clientId, delta: -l.delta, reason: 'Poništenje (obrisan unos)', kind:'auto',
+        ref: 'reverse:'+id, by:'auto', balanceAfter: pointsBalance(ledger, l.clientId) - l.delta,
+      }));
+      ledger = [...ledger, ...reversals];
+    }
+    const nd={...data, entries:data.entries.filter(e=>e.id!==id), pointsLedger: ledger};
     saveData(nd); onRefresh(nd); setToast({msg:'Unos obrisan.'});
   };
 
@@ -3110,7 +3179,7 @@ Tim Hypnotic salona`;
 }
 
 // ─── Klijentice (CRM) ────────────────────────────────────────────────────
-function Klijentice({ data, salonId, onRefresh }) {
+function Klijentice({ data, salonId, onRefresh, activeStaff }) {
   const [search, setSearch] = useState('');
   const [view, setView] = useState('all'); // all | inactive | leads | lojalnost | top
   const [inactiveDays, setInactiveDays] = useState(30);
@@ -3265,7 +3334,7 @@ function Klijentice({ data, salonId, onRefresh }) {
     if (!reason.trim()) { setToast({msg:'Ručna promjena bodova mora imati razlog.',type:'error'}); return; }
     const ledger = data.pointsLedger || [];
     const balanceAfter = pointsBalance(ledger, clientId) + d;
-    const entry = makeLedgerEntry({clientId, delta:d, reason:reason.trim(), kind:'manual', by: salonId==='all'?'admin':salonId, balanceAfter});
+    const entry = makeLedgerEntry({clientId, delta:d, reason:reason.trim(), kind:'manual', by: activeStaff || (salonId==='all'?'admin':salonId), balanceAfter});
     save({...data, pointsLedger:[...ledger, entry]});
     setPtDelta(''); setPtReason('');
     setToast({msg:`Bodovi ${d>0?'dodani':'oduzeti'}: ${d>0?'+':''}${d}`});
@@ -5878,6 +5947,20 @@ function App({ initialData }) {
   const refresh = useCallback(d=>setData(d),[]);
   const logout  = () => { sessionStorage.removeItem('hypnotic_session'); setSalonId(null); };
 
+  // ── Aktivna djelatnica (tko unosi) + auto-povratak nakon 2 min neaktivnosti ──
+  const [activeStaff, setActiveStaff] = useState(()=>{ try{return sessionStorage.getItem('hypnotic_active_staff')||'';}catch(e){return '';} });
+  const setActive = (name) => { setActiveStaff(name); try{ name?sessionStorage.setItem('hypnotic_active_staff',name):sessionStorage.removeItem('hypnotic_active_staff'); }catch(e){} };
+  const IDLE_MS = 120000; // 2 minute
+  useEffect(() => {
+    if (!salonId || salonId==='all') return; // samo za saloni-prijavu (cure), ne za admina
+    let t;
+    const reset = () => { clearTimeout(t); t = setTimeout(()=>setActive(''), IDLE_MS); };
+    const evs = ['pointerdown','keydown','click','touchstart'];
+    evs.forEach(e=>window.addEventListener(e, reset, {passive:true}));
+    reset();
+    return () => { clearTimeout(t); evs.forEach(e=>window.removeEventListener(e, reset)); };
+  }, [salonId, activeStaff]);
+
   // ── Real-time Firebase sync ──────────────────────────────────────────────
   useEffect(() => {
     if (!__db) return;
@@ -5914,18 +5997,41 @@ function App({ initialData }) {
         <div className="salon-badge">
           <span className="salon-dot" style={{background:salonId==='all'?'var(--gold)':salonColor}}></span>
           <span className="salon-name-display" title="Klikni za odjavu" onClick={logout}>{salonLabel} ▸ Odjava</span>
+          {salonId!=='all' && activeStaff && (
+            <span onClick={()=>setActive('')} title="Promijeni djelatnicu"
+              style={{marginLeft:10,fontSize:12,background:'rgba(255,255,255,0.18)',color:'#fff',padding:'3px 10px',borderRadius:12,cursor:'pointer',whiteSpace:'nowrap'}}>
+              👤 {activeStaff.split(' ')[0]} ▾
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Prijava djelatnice: tko unosi (vraća se ovamo nakon 2 min neaktivnosti) */}
+      {salonId!=='all' && !activeStaff && (
+        <div style={{position:'fixed',inset:0,background:'rgba(26,26,46,0.97)',zIndex:2000,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24}}>
+          <div style={{color:'#fff',fontSize:22,fontWeight:800,marginBottom:6}}>Tko unosi?</div>
+          <div style={{color:'#bbb',fontSize:14,marginBottom:24,textAlign:'center',lineHeight:1.5}}>Odaberi svoje ime za nastavak.<br/>Nakon 2 min neaktivnosti aplikacija se vraća ovamo.</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,width:'100%',maxWidth:460}}>
+            {(data.staff||[]).filter(s=>!s.salonId||s.salonId===salonId).map(s=>(
+              <button key={s.id||s.name} onClick={()=>setActive(s.name)}
+                style={{padding:'16px 12px',borderRadius:12,border:'none',background:salonColor,color:'#fff',fontSize:16,fontWeight:700,cursor:'pointer'}}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="nav-bar">
         {tabs.map(([k,l])=>(
           <div key={k} className={`nav-tab${tab===k?' active':''}`} onClick={()=>setTab(k)}>{l}</div>
         ))}
       </div>
       <div className="main">
-        {tab==='unos'        && <NoviUnos    data={data} salonId={salonId} onRefresh={refresh}/>}
+        {tab==='unos'        && <NoviUnos    data={data} salonId={salonId} onRefresh={refresh} activeStaff={activeStaff}/>}
         {tab==='pregled'     && <Pregled     data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='statistike'  && <Statistike  data={data} salonId={salonId}/>}
-        {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh}/>}
+        {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh} activeStaff={activeStaff}/>}
         {tab==='skladiste'   && <Skladiste   data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
