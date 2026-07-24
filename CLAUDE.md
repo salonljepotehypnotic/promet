@@ -153,3 +153,12 @@ Passwords are: Savska=1234, Dobojska=5678, Admin=9999 — treat as confidential,
 - Fixed Firebase key encoding for service names with slashes in consumptions  
 - Fixed normativ (service consumption norms) save for service names containing `/`
 
+### Loyalty/CRM build — Faza 1 (Jul 2026)
+
+Klijentice → CRM upgrade. New client fields (all optional, backward-compatible): `dolazak` (arrival source), `status` (manual override; else auto), `referredBy` (Faza 2), `aliases[]` (for duplicate-merge without losing name-linked entries), `tags[]`.
+- **Veza po ID-u:** `NoviUnos.handleSave` now finds/creates a client record and stamps `entry.clientId`. Historical 36k seed entries stay name-linked (never retrofitted); points accrue forward only.
+- Helpers (top-level): `normName`, `normPhone`, `clientNameKeys(c)` (main name + aliases), `autoStatus`/`effStatus`, `getArrivalSources(data)` (reads `config.arrivalSources`, else `DEFAULT_ARRIVAL_SOURCES`), `CLIENT_STATUSES`, `STATUS_COLORS`.
+- Klijentice card is now tabbed (Osnovni / Statistika / Povijest). Stats aggregate across name+aliases; computes `firstVisit`, `favService`, `favStaff`. Povijest tab has date/staff/service filters. New "📥 Izvori" view = arrival-source breakdown. Metrics with no data source (otkazani/nedolasci from Zoyya; bodovi/preporuke/razina from later phases) show neutral "—", never fabricated.
+- Verified: full Babel compile clean, no console errors; card renders on real data (Lara Lalić: firstVisit 28.11.2024 computed from history). Pure-logic unit tests pass.
+- Backup before edits: `backups/index.BACKUP-*.html`. Not yet pushed to GitHub Pages.
+

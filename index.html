@@ -128,6 +128,29 @@ const __db = window.__firebaseDb || null;
 // Payment methods that count toward staff revenue (configurable by admin)
 const DEFAULT_PROMET_PAYMENTS = ['GOTOVINA','KARTICA','OSTALO-NE','IZ PAKETA','AKONTACIJA','POKLON BON-odrađeno'];
 
+// ── Klijentice — izvor dolaska + statusi (Faza 1) ────────────────────────
+// Zadane vrijednosti; admin ih kasnije može urediti kroz config.arrivalSources (Faza 3).
+// Nikad "zakovano" — čita se iz configa ako postoji, inače default.
+const DEFAULT_ARRIVAL_SOURCES = ['Meta Ads','Google','Instagram','Facebook','TikTok','Preporuka','Prolaznik','Postojeća klijentica','Drugo'];
+const CLIENT_STATUSES = ['nova','aktivna','redovna','neaktivna','VIP','lead','izgubljena'];
+const getArrivalSources = data => (data && data.config && Array.isArray(data.config.arrivalSources) && data.config.arrivalSources.length)
+  ? data.config.arrivalSources : DEFAULT_ARRIVAL_SOURCES;
+// Boje za prikaz statusa
+const STATUS_COLORS = {nova:'#3498DB',aktivna:'#27AE60',redovna:'#0D7377',neaktivna:'#E67E22',VIP:'#D4AF37',lead:'#856404',izgubljena:'#E74C3C'};
+// Automatski status po danima od zadnjeg posjeta — koristi se samo ako klijentica NEMA ručno postavljen status.
+// VIP se nikad ne postavlja automatski (ručna oznaka).
+function autoStatus(c){
+  if((c.source==='lead') && !c.lastVisit) return 'lead';
+  if(!c.lastVisit) return 'nova';
+  const d = c.daysSince;
+  if(d==null) return 'nova';
+  if((c.visits||0)>=6 && d<=45) return 'redovna';
+  if(d<=60) return 'aktivna';
+  if(d<=120) return 'neaktivna';
+  return 'izgubljena';
+}
+const effStatus = c => (c.status && c.status.trim()) ? c.status : autoStatus(c);
+
 // Set of seed entry IDs (we never re-upload these to Firebase)
 const SEED_ENTRY_IDS = new Set((SEED.entries||[]).map(e => e.id));
 
@@ -270,6 +293,24 @@ const monthKey = d => d ? d.slice(0,7) : '';
 const MONTH_NAMES = ['','Sij','Velj','Ožu','Tra','Svi','Lip','Srp','Kol','Ruj','Lis','Stu','Pro'];
 const monthName = k => { const [y,m]=k.split('-'); return MONTH_NAMES[parseInt(m)]+' '+y.slice(2); };
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
+
+// ── Normalizacija za usporedbu klijentica (dedup + veza po ID-u) ──────────
+// normName: velika slova, jednostruki razmaci, bez rubnih razmaka
+const normName = n => String(n||'').replace(/\s+/g,' ').trim().toUpperCase();
+// normPhone: samo znamenke, hrvatski format na 385...
+const normPhone = p => {
+  let s = String(p||'').replace(/[^0-9]/g,'');
+  if(s.startsWith('00385')) s='385'+s.slice(5);
+  else if(s.startsWith('385')) {/* ok */}
+  else if(s.startsWith('0')) s='385'+s.slice(1);
+  return s.length>=8 ? s : '';
+};
+// Sva imena po kojima se klijentica prepoznaje u prometu (glavno ime + aliasi od spajanja duplikata)
+const clientNameKeys = c => {
+  const keys = [normName(c.name)];
+  (c.aliases||[]).forEach(a=>{ const k=normName(a); if(k && !keys.includes(k)) keys.push(k); });
+  return keys.filter(Boolean);
+};
 
 // Normalize payment type names to canonical form (fixes case/spacing variants)
 const normPayment = p => {
@@ -437,6 +478,12 @@ function NoviUnos({ data, salonId, onRefresh }) {
   const clientNames = useMemo(() =>
     [...new Set(data.entries.filter(e=>!salonId||salonId==='all'||e.salon===salonId).map(e=>e.clientName).filter(Boolean))].sort(),
   [data.entries, salonId]);
+  // Mapa postojećih klijentica po normaliziranom imenu (glavno ime + aliasi) — za vezu po ID-u
+  const clientByName = useMemo(() => {
+    const m = {};
+    (data.clients||[]).forEach(c => clientNameKeys(c).forEach(k => { if(!m[k]) m[k]=c; }));
+    return m;
+  }, [data.clients]);
   const staffNames = useMemo(() =>
     data.staff
       .filter(s => salonId==='all' || !s.salonId || s.salonId==='all' || s.salonId===salonId)
@@ -449,6 +496,7 @@ function NoviUnos({ data, salonId, onRefresh }) {
     salon: salonId==='all' ? (data.salons[0]?.id||'savska') : salonId,
     date: today(), clientName:'', staff: '',
     service:'', price:'', discount:'0', quantity:'1', payment: payments[0]||'GOTOVINA', note:'',
+    arrivalSource:'',
   });
   const [total, setTotal] = useState(0);
   const [toast, setToast] = useState(null);
@@ -494,7 +542,20 @@ function NoviUnos({ data, salonId, onRefresh }) {
   const handleSave = () => {
     if (!form.clientName.trim()) { setToast({msg:'Unesite ime klijentice!',type:'error'}); return; }
     if (!form.service.trim())    { setToast({msg:'Odaberite uslugu!',type:'error'}); return; }
-    const entry = { id:uid(), ...form,
+    // ── Veza po ID-u: nađi postojeću klijenticu (po imenu/aliasu) ili kreiraj novu ──
+    const key = normName(form.clientName);
+    let clients = data.clients || [];
+    let client = clientByName[key];
+    if (!client) {
+      client = { id: uid(), name: form.clientName.trim(), email:'', phone:'', birthday:'',
+        notes:'', preferences:'', personality:'', source:'promet',
+        dolazak: form.arrivalSource||'', status:'', referredBy:'', aliases:[], tags:[],
+        createdAt: new Date().toISOString() };
+      clients = [...clients, client];
+    }
+    // arrivalSource se ne sprema na unos prometa — samo na karton klijentice
+    const { arrivalSource, ...formRest } = form;
+    const entry = { id:uid(), ...formRest, clientId: client.id,
       price:parseFloat(form.price)||0, discount:parseFloat(form.discount)||0,
       quantity:parseFloat(form.quantity)||1, total, createdAt: new Date().toISOString() };
 
@@ -502,7 +563,7 @@ function NoviUnos({ data, salonId, onRefresh }) {
     const salonForStock = form.salon || salonId;
     const rawCons327 = (data.consumptions || {})[form.service];
     const consumptionItems = !rawCons327 ? [] : Array.isArray(rawCons327) ? rawCons327 : (rawCons327.items || []);
-    let nd = { ...data, entries:[...data.entries, entry] };
+    let nd = { ...data, clients, entries:[...data.entries, entry] };
     if (consumptionItems.length > 0) {
       const newStock = JSON.parse(JSON.stringify(nd.stock || {}));
       if (!newStock[salonForStock]) newStock[salonForStock] = {};
@@ -516,12 +577,16 @@ function NoviUnos({ data, salonId, onRefresh }) {
     saveData(nd); onRefresh(nd);
     setToast({msg:'Unos spremljen! €'+fmt(total)});
     setStockWarning(null);
-    setForm(f=>({...f, clientName: keepClient ? f.clientName : '', service:'', price:'', discount:'0', quantity:'1', note:''}));
+    setForm(f=>({...f, clientName: keepClient ? f.clientName : '', service:'', price:'', discount:'0', quantity:'1', note:'', arrivalSource:''}));
   };
 
   const salonColor = salonId==='all'
     ? (data.salons.find(s=>s.id===form.salon)?.color||'var(--teal)')
     : (salon?.color||'var(--teal)');
+
+  // Je li upisano ime nova klijentica (ne postoji karton)? → tražimo izvor dolaska
+  const typedKey = normName(form.clientName);
+  const isNewClient = !!typedKey && !clientByName[typedKey];
 
   return (
     <div>
@@ -552,6 +617,16 @@ function NoviUnos({ data, salonId, onRefresh }) {
             <Autocomplete value={form.clientName} onChange={v=>set('clientName', typeof v==='string'?v:(v.name||v))}
               suggestions={clientNames.map(n=>({name:n}))} placeholder="Unesite ime..." />
           </div>
+          {isNewClient && (
+            <div className="form-group">
+              <label>🌟 Nova klijentica — kako je došla?</label>
+              <select value={form.arrivalSource} onChange={e=>set('arrivalSource',e.target.value)}
+                style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--gold)',borderRadius:8,fontSize:14,background:'#FFFDF5'}}>
+                <option value="">— odaberi (nije obavezno) —</option>
+                {getArrivalSources(data).map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
           <div className="form-group">
             <label>💆 Djelatnica</label>
             <Autocomplete value={form.staff} onChange={v=>handleStaff(typeof v==='string'?{name:v}:v)}
@@ -2893,31 +2968,39 @@ function Klijentice({ data, salonId, onRefresh }) {
   const [toast, setToast] = useState(null);
   const [page, setPage] = useState(1);
   const PAGE = 50;
+  const [cardTab, setCardTab] = useState('osnovni'); // osnovni | statistika | povijest
+  const [hFilter, setHFilter] = useState({q:'', staff:'', from:'', to:''}); // filtri povijesti tretmana
 
   const save = d => { saveData(d); onRefresh(d); setToast({msg:'Promjene spremljene!'}); };
 
-  // Build last visit map from entries
+  // Build last visit map from entries (ključ = normalizirano ime; fallback na e.client za starije zapise)
   const lastVisitMap = useMemo(() => {
     const m = {};
     data.entries.forEach(e => {
-      const key = (e.clientName||'').toUpperCase();
-      if (!m[key] || e.date > m[key].date) {
+      const key = normName(e.clientName || e.client);
+      if (!key) return;
+      if (!m[key] || (e.date||'') > m[key].date) {
         m[key] = { date: e.date, service: e.service, staff: e.staff };
       }
     });
     return m;
   }, [data.entries]);
 
-  // Build visit stats per client
+  // Build visit stats per client (broj, promet, mjeseci, prvi dolazak, najčešća usluga/djelatnica)
   const statsMap = useMemo(() => {
     const m = {};
     data.entries.forEach(e => {
-      const key = (e.clientName||'').toUpperCase();
-      if (!m[key]) m[key] = { count:0, total:0, months:{} };
-      m[key].count++;
-      m[key].total += (e.total||0);
+      const key = normName(e.clientName || e.client);
+      if (!key) return;
+      if (!m[key]) m[key] = { count:0, total:0, months:{}, first:null, services:{}, staff:{} };
+      const o = m[key];
+      o.count++;
+      o.total += (e.total||0);
       const mk = (e.date||'').slice(0,7);
-      m[key].months[mk] = (m[key].months[mk]||0) + (e.total||0);
+      o.months[mk] = (o.months[mk]||0) + (e.total||0);
+      if (e.date && (!o.first || e.date < o.first)) o.first = e.date;
+      if (e.service) o.services[e.service] = (o.services[e.service]||0) + 1;
+      if (e.staff)   o.staff[e.staff]     = (o.staff[e.staff]||0) + 1;
     });
     return m;
   }, [data.entries]);
@@ -2925,15 +3008,30 @@ function Klijentice({ data, salonId, onRefresh }) {
   const todayStr = today();
 
   const clientsWithStats = useMemo(() => {
+    const topKey = obj => { let best=null,bn=0; Object.entries(obj).forEach(([k,n])=>{ if(n>bn){bn=n;best=k;} }); return best; };
     return (data.clients||[]).map(c => {
-      const key = c.name.toUpperCase();
-      const lv = lastVisitMap[key];
-      const st = statsMap[key] || {count:0, total:0, months:{}};
+      const keys = clientNameKeys(c);
+      // agregiraj statistiku kroz glavno ime + sve aliase (spajanje duplikata ne gubi termine)
+      let lv=null, count=0, total=0, first=null;
+      const months={}, services={}, staff={};
+      keys.forEach(k => {
+        const st = statsMap[k];
+        if (st) {
+          count += st.count; total += st.total;
+          Object.entries(st.months).forEach(([m,v])=>months[m]=(months[m]||0)+v);
+          Object.entries(st.services).forEach(([s,n])=>services[s]=(services[s]||0)+n);
+          Object.entries(st.staff).forEach(([s,n])=>staff[s]=(staff[s]||0)+n);
+          if (st.first && (!first || st.first<first)) first = st.first;
+        }
+        const l = lastVisitMap[k];
+        if (l && (!lv || (l.date||'')>lv.date)) lv = l;
+      });
       const daysSince = lv ? Math.floor((new Date(todayStr)-new Date(lv.date))/(1000*60*60*24)) : null;
-      const monthCount = Object.keys(st.months).length;
-      const avgMonthly = monthCount ? st.total/monthCount : 0;
+      const monthCount = Object.keys(months).length;
+      const avgMonthly = monthCount ? total/monthCount : 0;
       return { ...c, lastVisit: lv?.date||null, lastService: lv?.service||'', lastStaff: lv?.staff||'',
-               daysSince, visits: st.count, totalSpent: st.total, avgMonthly };
+               firstVisit: first, daysSince, visits: count, totalSpent: total, avgMonthly,
+               favService: topKey(services), favStaff: topKey(staff) };
     });
   }, [data.clients, lastVisitMap, statsMap]);
 
@@ -3040,9 +3138,13 @@ function Klijentice({ data, salonId, onRefresh }) {
 
   // Selected client detail
   const selClient = selected ? clientsWithStats.find(c=>c.id===selected) : null;
-  const selEntries = selClient
-    ? data.entries.filter(e=>(e.clientName||'').toUpperCase()===selClient.name.toUpperCase()).sort((a,b)=>b.date.localeCompare(a.date))
-    : [];
+  const selEntries = useMemo(() => {
+    if (!selClient) return [];
+    const keys = new Set(clientNameKeys(selClient));
+    return data.entries
+      .filter(e => (e.clientId && e.clientId===selClient.id) || keys.has(normName(e.clientName || e.client)))
+      .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  }, [selClient, data.entries]);
 
   const openEdit = c => { setEditClient({...c}); setEditMode(true); };
   const saveEdit = () => {
@@ -3060,7 +3162,7 @@ function Klijentice({ data, salonId, onRefresh }) {
   const addClient = () => {
     // Just open the empty form — don't write to Firebase yet.
     // The client is only saved when user clicks "💾 Spremi" (saveEdit).
-    const nc = {id:uid(), name:'', email:'', phone:'', birthday:'', notes:'', preferences:'', personality:'', source:'manual', tags:[]};
+    const nc = {id:uid(), name:'', email:'', phone:'', birthday:'', notes:'', preferences:'', personality:'', source:'manual', dolazak:'', status:'', referredBy:'', aliases:[], tags:[]};
     setEditClient(nc); setEditMode(true); setSelected(null);
     setView('all');
   };
@@ -3076,7 +3178,7 @@ function Klijentice({ data, salonId, onRefresh }) {
     <div>
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={()=>setToast(null)} />}
       <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
-        {[['all',`Sve (${(data.clients||[]).length})`],['inactive',`⏰ Bez posjeta ${inactiveDays}+ dana`],['leads','📣 Meta Ads leadovi'],['lojalnost','💚 Lojalnost'],['top','🏆 TOP 10']].map(([k,l])=>(
+        {[['all',`Sve (${(data.clients||[]).length})`],['inactive',`⏰ Bez posjeta ${inactiveDays}+ dana`],['izvori','📥 Izvori'],['leads','📣 Meta Ads leadovi'],['lojalnost','💚 Lojalnost'],['top','🏆 TOP 10']].map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${view===k?'btn-primary':'btn-outline'}`} onClick={()=>{setView(k);setPage(1);}}>
             {l}
           </button>
@@ -3193,6 +3295,49 @@ function Klijentice({ data, salonId, onRefresh }) {
           </div>
         </div>
       )}
+
+      {/* ── IZVORI DOLASKA view ─────────────────────────────── */}
+      {view==='izvori' && (()=>{
+        const withSrc = clientsWithStats.filter(c=>c.dolazak && c.dolazak.trim());
+        const bez = clientsWithStats.length - withSrc.length;
+        const agg = {};
+        withSrc.forEach(c=>{
+          const k=c.dolazak.trim();
+          if(!agg[k]) agg[k]={src:k,count:0,spent:0,visits:0};
+          agg[k].count++; agg[k].spent+=(c.totalSpent||0); agg[k].visits+=(c.visits||0);
+        });
+        const rows = Object.values(agg).sort((a,b)=>b.count-a.count);
+        return (
+          <div>
+            <div className="card" style={{marginBottom:16}}>
+              <div className="card-title">📥 Odakle nam klijentice dolaze</div>
+              <p style={{fontSize:12,color:'#888',marginBottom:12}}>
+                Broji se izvor upisan na kartonu. Podatak raste od sada — nove klijentice dobivaju izvor pri prvom unosu.
+                {bez>0 && <span> Trenutačno <strong>{bez}</strong> klijentica bez upisanog izvora.</span>}
+              </p>
+              {rows.length===0
+                ? <p style={{color:'#aaa',textAlign:'center',padding:20}}>Još nema upisanih izvora. Počnite označavati kod novih klijentica.</p>
+                : <div style={{overflowX:'auto'}}>
+                    <table>
+                      <thead><tr><th>Izvor</th><th style={{textAlign:'right'}}>Klijentica</th><th style={{textAlign:'right'}}>Ukupan promet</th><th style={{textAlign:'right'}}>Prosjek/klijentici</th><th style={{textAlign:'right'}}>Posjeta</th></tr></thead>
+                      <tbody>
+                        {rows.map((r,i)=>(
+                          <tr key={r.src} className={i%2===1?'tr-alt':''}>
+                            <td style={{fontWeight:600}}><span style={{fontSize:11,background:'#EDE7F6',color:'#5E35B1',padding:'2px 10px',borderRadius:10}}>{r.src}</span></td>
+                            <td style={{textAlign:'right',fontWeight:700}}>{r.count}</td>
+                            <td style={{textAlign:'right',color:'var(--green)',fontWeight:700}}>€{fmt(r.spent)}</td>
+                            <td style={{textAlign:'right',color:'#666'}}>€{fmt(r.count?r.spent/r.count:0)}</td>
+                            <td style={{textAlign:'right',color:'#666'}}>{r.visits}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+              }
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── TOP 10 view ────────────────────────────────────── */}
       {view==='top' && (
@@ -3318,11 +3463,20 @@ function Klijentice({ data, salonId, onRefresh }) {
         {/* Client profile */}
         {selClient && !editMode && (
           <div className="card" style={{maxHeight:'calc(100vh - 240px)',overflowY:'auto'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
+            {/* Header: ime + status + akcije */}
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
               <div>
                 <div style={{fontSize:20,fontWeight:800}}>{selClient.name}</div>
-                {selClient.source==='lead' && <span style={{fontSize:11,background:'#FFF3CD',color:'#856404',padding:'2px 8px',borderRadius:10,marginTop:4,display:'inline-block'}}>Meta Ads lead</span>}
-                {selClient.source==='both' && <span style={{fontSize:11,background:'#E8F5E9',color:'#2E7D32',padding:'2px 8px',borderRadius:10,marginTop:4,display:'inline-block'}}>Klijentica + lead</span>}
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:6,alignItems:'center'}}>
+                  {(()=>{ const st=effStatus(selClient); return (
+                    <span style={{fontSize:11,fontWeight:700,background:(STATUS_COLORS[st]||'#888')+'22',color:STATUS_COLORS[st]||'#888',padding:'2px 10px',borderRadius:10,textTransform:'uppercase',letterSpacing:.3}}>
+                      {st}{!(selClient.status&&selClient.status.trim())&&' ·auto'}
+                    </span>
+                  ); })()}
+                  {selClient.dolazak && <span style={{fontSize:11,background:'#EDE7F6',color:'#5E35B1',padding:'2px 10px',borderRadius:10}}>📥 {selClient.dolazak}</span>}
+                  {selClient.source==='lead' && <span style={{fontSize:11,background:'#FFF3CD',color:'#856404',padding:'2px 8px',borderRadius:10}}>Meta Ads lead</span>}
+                  {selClient.source==='both' && <span style={{fontSize:11,background:'#E8F5E9',color:'#2E7D32',padding:'2px 8px',borderRadius:10}}>Klijentica + lead</span>}
+                </div>
               </div>
               <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
                 {view==='inactive' && (selClient.phone||selClient.email) && (
@@ -3338,86 +3492,166 @@ function Klijentice({ data, salonId, onRefresh }) {
               </div>
             </div>
 
-            {/* Contact */}
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
-              {[
-                ['📞', 'Telefon', selClient.phone],
-                ['✉️', 'Email', selClient.email],
-                ['🎂', 'Rođendan', selClient.birthday ? fmtDate(selClient.birthday) : ''],
-                ['✨', 'Osobnost', selClient.personality],
-              ].map(([icon,label,val])=>val?(
-                <div key={label} style={{background:'#F8F9FA',borderRadius:8,padding:'8px 12px'}}>
-                  <div style={{fontSize:11,color:'#888'}}>{icon} {label}</div>
-                  <div style={{fontWeight:600,fontSize:13,wordBreak:'break-all'}}>{val}</div>
-                </div>
-              ):null)}
-            </div>
-
-            {/* Stats */}
-            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:16}}>
-              {[
-                ['Posjeta', selClient.visits],
-                ['Ukupno', `€${fmt(selClient.totalSpent)}`],
-                ['Prosjek/mj.', `€${fmt(selClient.avgMonthly)}`],
-              ].map(([l,v])=>(
-                <div key={l} style={{background:'var(--teal-l)',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
-                  <div style={{fontSize:11,color:'#666'}}>{l}</div>
-                  <div style={{fontWeight:800,color:'var(--teal)',fontSize:16}}>{v}</div>
-                </div>
+            {/* Tabovi kartona */}
+            <div style={{display:'flex',gap:6,marginBottom:16,borderBottom:'1.5px solid var(--border)'}}>
+              {[['osnovni','👤 Osnovni podaci'],['statistika','📊 Statistika'],['povijest',`📋 Povijest (${selEntries.length})`]].map(([k,l])=>(
+                <button key={k} onClick={()=>setCardTab(k)}
+                  style={{border:'none',background:'none',padding:'8px 12px',fontSize:13,fontWeight:cardTab===k?700:500,
+                    color:cardTab===k?'var(--teal)':'#888',borderBottom:cardTab===k?'2.5px solid var(--teal)':'2.5px solid transparent',cursor:'pointer',marginBottom:-1.5}}>
+                  {l}
+                </button>
               ))}
             </div>
 
-            {/* Preferences & notes */}
-            {(selClient.preferences || selClient.notes) && (
-              <div style={{marginBottom:16}}>
-                {selClient.preferences && (
-                  <div style={{background:'#FFF3E0',borderRadius:8,padding:'8px 12px',marginBottom:8}}>
-                    <div style={{fontSize:11,color:'#E65100',fontWeight:700}}>⭐ Preferencije</div>
-                    <div style={{fontSize:13,marginTop:4}}>{selClient.preferences}</div>
+            {/* ── TAB: Osnovni podaci ── */}
+            {cardTab==='osnovni' && (
+            <div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
+                {[
+                  ['📞','Telefon', selClient.phone],
+                  ['✉️','Email', selClient.email],
+                  ['🎂','Rođendan', selClient.birthday ? fmtDate(selClient.birthday) : ''],
+                  ['📥','Izvor dolaska', selClient.dolazak],
+                  ['🟢','Prvi dolazak', selClient.firstVisit ? fmtDate(selClient.firstVisit) : ''],
+                  ['📅','Zadnji dolazak', selClient.lastVisit ? fmtDate(selClient.lastVisit) : ''],
+                  ['⏳','Dana od zadnjeg', selClient.daysSince!=null ? `${selClient.daysSince} dana` : ''],
+                  ['🤝','Preporučila', (()=>{ const r=selClient.referredBy&&(data.clients||[]).find(c=>c.id===selClient.referredBy); return r?r.name:''; })()],
+                  ['✨','Osobnost', selClient.personality],
+                ].map(([icon,label,val])=>(
+                  <div key={label} style={{background:'#F8F9FA',borderRadius:8,padding:'8px 12px'}}>
+                    <div style={{fontSize:11,color:'#888'}}>{icon} {label}</div>
+                    <div style={{fontWeight:600,fontSize:13,wordBreak:'break-word',color:val?'#1A1A2E':'#bbb'}}>{val||'—'}</div>
                   </div>
-                )}
-                {selClient.notes && (
-                  <div style={{background:'#F3E5F5',borderRadius:8,padding:'8px 12px'}}>
-                    <div style={{fontSize:11,color:'#6A1B9A',fontWeight:700}}>📝 Napomene</div>
-                    <div style={{fontSize:13,marginTop:4}}>{selClient.notes}</div>
-                  </div>
-                )}
+                ))}
               </div>
-            )}
-
-            {/* Reminder email */}
-            {selClient.email && selClient.daysSince !== null && selClient.daysSince >= 14 && (
-              <div style={{background:'#FFF9E6',border:'1.5px solid var(--gold)',borderRadius:8,padding:'10px 14px',marginBottom:16}}>
-                <div style={{fontSize:12,fontWeight:700,color:'#856404',marginBottom:6}}>
-                  ⏰ Nije bila {selClient.daysSince} dana — pošalji podsjetnik
+              {(selClient.tags||[]).length>0 && (
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
+                  {(selClient.tags||[]).map(t=><span key={t} style={{fontSize:11,background:'var(--teal-l)',color:'var(--teal)',padding:'3px 10px',borderRadius:10}}>#{t}</span>)}
                 </div>
-                <a href={`mailto:${selClient.email}?subject=${REMINDER_SUBJECT}&body=${reminderBody(selClient.name.split(' ')[0], selClient.daysSince, selClient.lastService)}`}
-                  className="btn btn-gold btn-sm" style={{textDecoration:'none',display:'inline-block'}}>
-                  📧 Otvori email klijent
-                </a>
-              </div>
+              )}
+              {selClient.preferences && (
+                <div style={{background:'#FFF3E0',borderRadius:8,padding:'8px 12px',marginBottom:8}}>
+                  <div style={{fontSize:11,color:'#E65100',fontWeight:700}}>⭐ Preferencije</div>
+                  <div style={{fontSize:13,marginTop:4}}>{selClient.preferences}</div>
+                </div>
+              )}
+              {selClient.notes && (
+                <div style={{background:'#F3E5F5',borderRadius:8,padding:'8px 12px',marginBottom:8}}>
+                  <div style={{fontSize:11,color:'#6A1B9A',fontWeight:700}}>📝 Napomene</div>
+                  <div style={{fontSize:13,marginTop:4}}>{selClient.notes}</div>
+                </div>
+              )}
+              {selClient.email && selClient.daysSince !== null && selClient.daysSince >= 14 && (
+                <div style={{background:'#FFF9E6',border:'1.5px solid var(--gold)',borderRadius:8,padding:'10px 14px',marginTop:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'#856404',marginBottom:6}}>
+                    ⏰ Nije bila {selClient.daysSince} dana — pošalji podsjetnik
+                  </div>
+                  <a href={`mailto:${selClient.email}?subject=${REMINDER_SUBJECT}&body=${reminderBody(selClient.name.split(' ')[0], selClient.daysSince, selClient.lastService)}`}
+                    className="btn btn-gold btn-sm" style={{textDecoration:'none',display:'inline-block'}}>
+                    📧 Otvori email klijent
+                  </a>
+                </div>
+              )}
+            </div>
             )}
 
-            {/* Treatment history */}
-            <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>📋 Povijest tretmana ({selEntries.length})</div>
-            {selEntries.length === 0 ? (
-              <p style={{color:'#aaa',fontSize:13}}>Nema tretmana u evidenciji.</p>
-            ) : (
-              <div style={{maxHeight:280,overflowY:'auto'}}>
-                <table>
-                  <thead><tr><th>Datum</th><th>Usluga</th><th>Djelatnica</th><th style={{textAlign:'right'}}>€</th></tr></thead>
-                  <tbody>
-                    {selEntries.slice(0,50).map((e,i)=>(
-                      <tr key={e.id} className={i%2===1?'tr-alt':''}>
-                        <td style={{whiteSpace:'nowrap',fontSize:12}}>{fmtDate(e.date)}</td>
-                        <td style={{fontSize:12,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.service}</td>
-                        <td style={{fontSize:12}}>{(e.staff||'').split(' ')[0]}</td>
-                        <td className="td-amount" style={{fontSize:12}}>€{fmt(e.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* ── TAB: Statistika ── */}
+            {cardTab==='statistika' && (
+            <div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:12}}>
+                {[
+                  ['Posjeta', selClient.visits||0],
+                  ['Ukupno', `€${fmt(selClient.totalSpent)}`],
+                  ['Prosjek/posjet', `€${fmt(selClient.visits?selClient.totalSpent/selClient.visits:0)}`],
+                  ['Prosjek/mj.', `€${fmt(selClient.avgMonthly)}`],
+                  ['Zadnji dolazak', selClient.lastVisit?fmtDate(selClient.lastVisit):'—'],
+                  ['Prvi dolazak', selClient.firstVisit?fmtDate(selClient.firstVisit):'—'],
+                ].map(([l,v])=>(
+                  <div key={l} style={{background:'var(--teal-l)',borderRadius:8,padding:'10px 12px',textAlign:'center'}}>
+                    <div style={{fontSize:11,color:'#666'}}>{l}</div>
+                    <div style={{fontWeight:800,color:'var(--teal)',fontSize:15}}>{v}</div>
+                  </div>
+                ))}
               </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+                <div style={{background:'#F8F9FA',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:11,color:'#888'}}>✨ Najčešća usluga</div>
+                  <div style={{fontWeight:600,fontSize:13,color:selClient.favService?'#1A1A2E':'#bbb'}}>{selClient.favService||'—'}</div>
+                </div>
+                <div style={{background:'#F8F9FA',borderRadius:8,padding:'8px 12px'}}>
+                  <div style={{fontSize:11,color:'#888'}}>💆 Najčešća djelatnica</div>
+                  <div style={{fontWeight:600,fontSize:13,color:selClient.favStaff?'#1A1A2E':'#bbb'}}>{selClient.favStaff||'—'}</div>
+                </div>
+              </div>
+              {/* Podaci koji dolaze u sljedećim fazama / iz Zoyye — pošteno prazno stanje, bez izmišljanja */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+                {[
+                  ['Otkazani termini','iz Zoyye'],
+                  ['Nedolasci','iz Zoyye'],
+                  ['Preporučene klijentice','Faza 2'],
+                  ['Trenutačni bodovi','Faza 3'],
+                  ['Razina lojalnosti','Faza 5'],
+                ].map(([l,tag])=>(
+                  <div key={l} style={{background:'#FAFAFA',border:'1px dashed var(--border)',borderRadius:8,padding:'8px 10px',textAlign:'center'}}>
+                    <div style={{fontSize:10.5,color:'#999'}}>{l}</div>
+                    <div style={{fontWeight:700,color:'#ccc',fontSize:15}}>—</div>
+                    <div style={{fontSize:9,color:'#bbb'}}>{tag}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            )}
+
+            {/* ── TAB: Povijest tretmana ── */}
+            {cardTab==='povijest' && (
+            <div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
+                <input placeholder="🔍 usluga..." value={hFilter.q} onChange={e=>setHFilter(f=>({...f,q:e.target.value}))}
+                  style={{flex:'1 1 120px',padding:'6px 10px',border:'1.5px solid var(--border)',borderRadius:6,fontSize:12}} />
+                <select value={hFilter.staff} onChange={e=>setHFilter(f=>({...f,staff:e.target.value}))}
+                  style={{padding:'6px 10px',border:'1.5px solid var(--border)',borderRadius:6,fontSize:12}}>
+                  <option value="">Sve djelatnice</option>
+                  {[...new Set(selEntries.map(e=>e.staff).filter(Boolean))].map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+                <input type="date" value={hFilter.from} onChange={e=>setHFilter(f=>({...f,from:e.target.value}))}
+                  style={{padding:'6px 8px',border:'1.5px solid var(--border)',borderRadius:6,fontSize:12}} title="Od datuma" />
+                <input type="date" value={hFilter.to} onChange={e=>setHFilter(f=>({...f,to:e.target.value}))}
+                  style={{padding:'6px 8px',border:'1.5px solid var(--border)',borderRadius:6,fontSize:12}} title="Do datuma" />
+                {(hFilter.q||hFilter.staff||hFilter.from||hFilter.to) &&
+                  <button className="btn btn-outline btn-sm" onClick={()=>setHFilter({q:'',staff:'',from:'',to:''})}>✕</button>}
+              </div>
+              {(()=>{
+                const hist = selEntries.filter(e=>{
+                  if(hFilter.q && !((e.service||'').toLowerCase().includes(hFilter.q.toLowerCase()))) return false;
+                  if(hFilter.staff && normName(e.staff)!==normName(hFilter.staff)) return false;
+                  if(hFilter.from && (e.date||'')<hFilter.from) return false;
+                  if(hFilter.to && (e.date||'')>hFilter.to) return false;
+                  return true;
+                });
+                if(selEntries.length===0) return <p style={{color:'#aaa',fontSize:13}}>Nema tretmana u evidenciji.</p>;
+                if(hist.length===0) return <p style={{color:'#aaa',fontSize:13}}>Nema tretmana za odabrane filtre.</p>;
+                return (
+                  <div style={{maxHeight:360,overflowY:'auto'}}>
+                    <table>
+                      <thead><tr><th>Datum</th><th>Usluga</th><th>Djelatnica</th><th style={{textAlign:'right'}}>Popust</th><th style={{textAlign:'right'}}>€</th><th>Napomena</th></tr></thead>
+                      <tbody>
+                        {hist.slice(0,200).map((e,i)=>(
+                          <tr key={e.id} className={i%2===1?'tr-alt':''}>
+                            <td style={{whiteSpace:'nowrap',fontSize:12}}>{fmtDate(e.date)}</td>
+                            <td style={{fontSize:12,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={e.service}>{e.service}</td>
+                            <td style={{fontSize:12}}>{(e.staff||'').split(' ')[0]}</td>
+                            <td style={{textAlign:'right',fontSize:12,color:e.discount?'var(--orange)':'#ccc'}}>{e.discount?`${e.discount}%`:'—'}</td>
+                            <td className="td-amount" style={{fontSize:12}}>€{fmt(e.total)}</td>
+                            <td style={{fontSize:11,color:'#999',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={e.note}>{e.note||''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {hist.length>200 && <div style={{fontSize:11,color:'#aaa',textAlign:'center',padding:8}}>Prikazano prvih 200 od {hist.length}.</div>}
+                  </div>
+                );
+              })()}
+            </div>
             )}
           </div>
         )}
@@ -3439,6 +3673,25 @@ function Klijentice({ data, salonId, onRefresh }) {
                   style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
               </div>
             ))}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
+              <div className="form-group">
+                <label style={{fontSize:12,color:'#666',fontWeight:600,display:'block',marginBottom:4}}>📥 Izvor dolaska</label>
+                <select value={editClient.dolazak||''} onChange={e=>setEditClient(c=>({...c,dolazak:e.target.value}))}
+                  style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}}>
+                  <option value="">— nepoznato —</option>
+                  {getArrivalSources(data).map(s=><option key={s} value={s}>{s}</option>)}
+                  {editClient.dolazak && !getArrivalSources(data).includes(editClient.dolazak) && <option value={editClient.dolazak}>{editClient.dolazak}</option>}
+                </select>
+              </div>
+              <div className="form-group">
+                <label style={{fontSize:12,color:'#666',fontWeight:600,display:'block',marginBottom:4}}>🏷️ Status</label>
+                <select value={editClient.status||''} onChange={e=>setEditClient(c=>({...c,status:e.target.value}))}
+                  style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}}>
+                  <option value="">— automatski —</option>
+                  {CLIENT_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
             <div style={{marginBottom:12}}>
               <label style={{fontSize:12,color:'#666',fontWeight:600,display:'block',marginBottom:4}}>⭐ Preferencije (što voli)</label>
               <textarea value={editClient.preferences||''} rows={2}
