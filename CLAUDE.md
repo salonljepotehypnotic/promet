@@ -160,5 +160,14 @@ Klijentice → CRM upgrade. New client fields (all optional, backward-compatible
 - Helpers (top-level): `normName`, `normPhone`, `clientNameKeys(c)` (main name + aliases), `autoStatus`/`effStatus`, `getArrivalSources(data)` (reads `config.arrivalSources`, else `DEFAULT_ARRIVAL_SOURCES`), `CLIENT_STATUSES`, `STATUS_COLORS`.
 - Klijentice card is now tabbed (Osnovni / Statistika / Povijest). Stats aggregate across name+aliases; computes `firstVisit`, `favService`, `favStaff`. Povijest tab has date/staff/service filters. New "📥 Izvori" view = arrival-source breakdown. Metrics with no data source (otkazani/nedolasci from Zoyya; bodovi/preporuke/razina from later phases) show neutral "—", never fabricated.
 - Verified: full Babel compile clean, no console errors; card renders on real data (Lara Lalić: firstVisit 28.11.2024 computed from history). Pure-logic unit tests pass.
-- Backup before edits: `backups/index.BACKUP-*.html`. Not yet pushed to GitHub Pages.
+- Backup before edits: `backups/index.BACKUP-*.html` (gitignored).
+
+### Loyalty/CRM build — Faza 2 (Jul 2026)
+
+Referrals + duplicate merge.
+- **Referrals:** `client.referredBy` (id) is the single source of truth; relationship derived (referrer = client by that id; referred = clients pointing back). New card tab **🤝 Preporuke**: shows who referred her (searchable picker to set/clear) + table of clients she referred (first visit, visits, spend, auto referral-status, points=Faza 3) + total referral value. Guards in `setReferrer`: no self, no circular (walks referredBy chain). Statistika tab now shows real "Preporučene klijentice" count.
+- Helpers: `REFERRAL_STATUSES`, `autoReferralStatus`/`effReferralStatus` (derived from referred client's activity; 'rezerviran prvi termin'/'nagrada dodijeljena' are manual-only — need Zoyya/Faza 4).
+- **Duplicate merge (admin only):** new **🔀 Duplikati** view groups candidates by phone (only clean HR mobile: 385+≥11 digits, avoids dirty-phone false matches), email, normName. `mergeClients(ids, survivorId)` is NON-DESTRUCTIVE to entries: survivor absorbs others' names as `aliases[]` (stats match by name∪aliases), fills blank fields, unions tags, repoints `referredBy` of anyone pointing to a merged id, repoints `entry.clientId` of future entries; deletes only the duplicate client records. Manual survivor pick + confirm dialog. ⚠️ Phone/name matches can be false positives (family shares a number; namesakes) — review each, backup first.
+- Card tab bar wraps (flexWrap) so 4th tab is reachable on mobile.
+- Verified: compile clean, Preporuke + Duplikati render on real data (67 candidate groups); merge & circular-guard logic unit-tested (13/13). Not tested by executing a live merge (Firebase is production).
 

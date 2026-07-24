@@ -312,6 +312,21 @@ const clientNameKeys = c => {
   return keys.filter(Boolean);
 };
 
+// ── Faza 2 — preporuke ────────────────────────────────────────────────────
+const REFERRAL_STATUSES = ['lead','rezerviran prvi termin','odrađen prvi termin','aktivna','neaktivna','nagrada dodijeljena'];
+const REFERRAL_STATUS_COLORS = {'lead':'#856404','rezerviran prvi termin':'#3498DB','odrađen prvi termin':'#0D7377','aktivna':'#27AE60','neaktivna':'#E67E22','nagrada dodijeljena':'#D4AF37'};
+// Auto-status preporuke iz aktivnosti preporučene klijentice; ručni override kroz polje referralStatus.
+// 'rezerviran prvi termin' i 'nagrada dodijeljena' traže vanjski/ručni podatak (Zoyya/Faza 4) → samo ručno.
+function autoReferralStatus(refClient){
+  if(!refClient) return null;
+  if((refClient.visits||0)===0) return 'lead';
+  const d = refClient.daysSince;
+  if(d==null) return 'odrađen prvi termin';
+  if(d<=60) return 'aktivna';
+  return 'neaktivna';
+}
+const effReferralStatus = c => (c && c.referralStatus && c.referralStatus.trim()) ? c.referralStatus : autoReferralStatus(c);
+
 // Normalize payment type names to canonical form (fixes case/spacing variants)
 const normPayment = p => {
   if (!p) return p;
@@ -2968,8 +2983,10 @@ function Klijentice({ data, salonId, onRefresh }) {
   const [toast, setToast] = useState(null);
   const [page, setPage] = useState(1);
   const PAGE = 50;
-  const [cardTab, setCardTab] = useState('osnovni'); // osnovni | statistika | povijest
+  const [cardTab, setCardTab] = useState('osnovni'); // osnovni | statistika | povijest | preporuke
   const [hFilter, setHFilter] = useState({q:'', staff:'', from:'', to:''}); // filtri povijesti tretmana
+  const [refSearch, setRefSearch] = useState(''); // tražilica preporučitelja
+  const [mergeSurvivor, setMergeSurvivor] = useState({}); // {groupKey: survivorId} za spajanje duplikata
 
   const save = d => { saveData(d); onRefresh(d); setToast({msg:'Promjene spremljene!'}); };
 
@@ -3034,6 +3051,79 @@ function Klijentice({ data, salonId, onRefresh }) {
                favService: topKey(services), favStaff: topKey(staff) };
     });
   }, [data.clients, lastVisitMap, statsMap]);
+
+  // ── Faza 2: mape preporuka ──
+  const clientById = useMemo(() => {
+    const m = {}; clientsWithStats.forEach(c => m[c.id]=c); return m;
+  }, [clientsWithStats]);
+  const referralsOf = useMemo(() => {
+    const m = {}; clientsWithStats.forEach(c => { if(c.referredBy){ (m[c.referredBy]=m[c.referredBy]||[]).push(c); } }); return m;
+  }, [clientsWithStats]);
+
+  // Grupe mogućih duplikata (po telefonu / emailu / imenu)
+  const dupeGroups = useMemo(() => {
+    const byPhone={}, byEmail={}, byNameK={};
+    clientsWithStats.forEach(c => {
+      // samo uredan HR mobitel (385 + 8-9 znamenki) — izbjegava lažne parove iz prljavih brojeva
+      const ph=normPhone(c.phone); if(ph && ph.startsWith('385') && ph.length>=11) (byPhone[ph]=byPhone[ph]||[]).push(c);
+      const em=(c.email||'').trim().toLowerCase(); if(em && em.includes('@')) (byEmail[em]=byEmail[em]||[]).push(c);
+      const nk=normName(c.name); if(nk) (byNameK[nk]=byNameK[nk]||[]).push(c);
+    });
+    const groups=[]; const seen=new Set();
+    const add=(map,reason)=>Object.entries(map).forEach(([k,arr])=>{
+      if(arr.length<2) return;
+      const sig=arr.map(c=>c.id).slice().sort().join('|');
+      if(seen.has(sig)) return; seen.add(sig);
+      groups.push({key:reason+':'+k, reason, members:arr});
+    });
+    add(byPhone,'telefon'); add(byEmail,'email'); add(byNameK,'ime');
+    return groups.sort((a,b)=>b.members.length-a.members.length);
+  }, [clientsWithStats]);
+
+  // Postavi tko je preporučio klijenticu (uz zaštite: self / kružno)
+  const setReferrer = (clientId, referrerId) => {
+    if (referrerId && referrerId===clientId) { setToast({msg:'Klijentica ne može preporučiti samu sebe.',type:'error'}); return; }
+    if (referrerId) { // kružna preporuka: hodaj lancem gore od preporučitelja
+      let cur = referrerId, hops = 0;
+      while (cur && hops < 500) {
+        if (cur === clientId) { setToast({msg:'Kružna preporuka nije dozvoljena.',type:'error'}); return; }
+        cur = clientById[cur]?.referredBy; hops++;
+      }
+    }
+    const nd = {...data, clients: data.clients.map(c => c.id===clientId ? {...c, referredBy: referrerId||''} : c)};
+    save(nd);
+    setToast({msg: referrerId ? 'Preporuka povezana!' : 'Preporuka uklonjena.'});
+  };
+
+  // Spajanje duplikata — čuva SVE termine (preko aliasa + preusmjeravanja clientId); ne briše unose
+  const mergeClients = (ids, survivorId) => {
+    const survivor = data.clients.find(c=>c.id===survivorId);
+    if (!survivor) return;
+    const others = data.clients.filter(c => ids.includes(c.id) && c.id!==survivorId);
+    if (others.length===0) return;
+    const otherIds = new Set(others.map(o=>o.id));
+    // aliasi = sva druga imena + njihovi aliasi (da statistika i dalje hvata sve termine)
+    const aliasSet = new Set(survivor.aliases||[]);
+    others.forEach(o => { if(o.name) aliasSet.add(o.name); (o.aliases||[]).forEach(a=>aliasSet.add(a)); });
+    aliasSet.delete(survivor.name);
+    const filled = {...survivor, aliases:[...aliasSet].filter(Boolean)};
+    // popuni prazna polja iz drugih zapisa; spoji tagove
+    const fields = ['email','phone','birthday','dolazak','status','notes','preferences','personality','referredBy','referralStatus','source'];
+    others.forEach(o => {
+      fields.forEach(f => { if(!filled[f] && o[f]) filled[f]=o[f]; });
+      filled.tags = [...new Set([...(filled.tags||[]), ...(o.tags||[])])];
+    });
+    if (otherIds.has(filled.referredBy) || filled.referredBy===survivorId) filled.referredBy=''; // ne referiraj na spojenog/sebe
+    // klijentice: makni spojene, zamijeni survivor, preusmjeri referredBy koji je pokazivao na spojene
+    const clients = data.clients
+      .filter(c => !otherIds.has(c.id))
+      .map(c => c.id===survivorId ? filled : (otherIds.has(c.referredBy) ? {...c, referredBy: survivorId} : c));
+    // preusmjeri clientId na budućim unosima (povijesni se hvataju preko aliasa)
+    const entries = data.entries.map(e => otherIds.has(e.clientId) ? {...e, clientId: survivorId} : e);
+    save({...data, clients, entries});
+    setSelected(survivorId);
+    setToast({msg:`Spojeno ${others.length+1} kartona u jedan. Svi termini sačuvani.`});
+  };
 
   const filtered = useMemo(() => {
     let list = clientsWithStats;
@@ -3178,7 +3268,7 @@ function Klijentice({ data, salonId, onRefresh }) {
     <div>
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={()=>setToast(null)} />}
       <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
-        {[['all',`Sve (${(data.clients||[]).length})`],['inactive',`⏰ Bez posjeta ${inactiveDays}+ dana`],['izvori','📥 Izvori'],['leads','📣 Meta Ads leadovi'],['lojalnost','💚 Lojalnost'],['top','🏆 TOP 10']].map(([k,l])=>(
+        {[['all',`Sve (${(data.clients||[]).length})`],['inactive',`⏰ Bez posjeta ${inactiveDays}+ dana`],['izvori','📥 Izvori'],['leads','📣 Meta Ads leadovi'],['lojalnost','💚 Lojalnost'],['top','🏆 TOP 10'],...(salonId==='all'?[['duplikati',`🔀 Duplikati${dupeGroups.length?' ('+dupeGroups.length+')':''}`]]:[])].map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${view===k?'btn-primary':'btn-outline'}`} onClick={()=>{setView(k);setPage(1);}}>
             {l}
           </button>
@@ -3293,6 +3383,43 @@ function Klijentice({ data, salonId, onRefresh }) {
                 </div>
             }
           </div>
+        </div>
+      )}
+
+      {/* ── DUPLIKATI view (admin) ──────────────────────────── */}
+      {view==='duplikati' && salonId==='all' && (
+        <div className="card">
+          <div className="card-title">🔀 Mogući duplikati klijentica</div>
+          <p style={{fontSize:12,color:'#888',marginBottom:14}}>
+            Spajanje čuva <strong>sve termine</strong> (druga imena postaju „aliasi" glavnog kartona). Odaberi glavni karton — u njega se sve spaja, ostali se brišu.
+            Preporuka: prije spajanja klikni <strong>Postavke → Backup</strong>.
+          </p>
+          {dupeGroups.length===0
+            ? <p style={{color:'#aaa',textAlign:'center',padding:24}}>Nema pronađenih duplikata. 🎉</p>
+            : dupeGroups.map(g=>{
+                const survivor = mergeSurvivor[g.key] || [...g.members].sort((a,b)=>(b.visits||0)-(a.visits||0))[0].id;
+                return (
+                  <div key={g.key} style={{border:'1.5px solid var(--border)',borderRadius:10,padding:12,marginBottom:12}}>
+                    <div style={{fontSize:11,color:'#888',marginBottom:8}}>Podudaranje po: <strong style={{color:'#5E35B1'}}>{g.reason}</strong> · odaberi glavni karton:</div>
+                    {g.members.map(m=>(
+                      <label key={m.id} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 4px',cursor:'pointer',borderBottom:'1px solid #F0F0F0',fontSize:13}}>
+                        <input type="radio" name={`surv-${g.key}`} checked={survivor===m.id} onChange={()=>setMergeSurvivor(s=>({...s,[g.key]:m.id}))} style={{width:16,height:16}} />
+                        <span style={{fontWeight:600,flex:1}}>{m.name}</span>
+                        <span style={{color:'#666',fontSize:11}}>{m.visits||0} posjeta · €{fmt(m.totalSpent)}</span>
+                        <span style={{color:'#aaa',fontSize:11}}>{m.phone||'—'}{m.email?' · '+m.email:''}</span>
+                      </label>
+                    ))}
+                    <div style={{marginTop:10,display:'flex',gap:8,alignItems:'center'}}>
+                      <button className="btn btn-primary btn-sm"
+                        onClick={()=>{ if(confirm(`Spojiti ${g.members.length} kartona u „${(g.members.find(m=>m.id===survivor)||{}).name}"? Termini se čuvaju, ostali kartoni se brišu.`)) mergeClients(g.members.map(m=>m.id), survivor); }}>
+                        🔀 Spoji ({g.members.length})
+                      </button>
+                      <span style={{fontSize:11,color:'#aaa'}}>glavni: <strong>{(g.members.find(m=>m.id===survivor)||{}).name}</strong></span>
+                    </div>
+                  </div>
+                );
+              })
+          }
         </div>
       )}
 
@@ -3493,8 +3620,8 @@ function Klijentice({ data, salonId, onRefresh }) {
             </div>
 
             {/* Tabovi kartona */}
-            <div style={{display:'flex',gap:6,marginBottom:16,borderBottom:'1.5px solid var(--border)'}}>
-              {[['osnovni','👤 Osnovni podaci'],['statistika','📊 Statistika'],['povijest',`📋 Povijest (${selEntries.length})`]].map(([k,l])=>(
+            <div style={{display:'flex',gap:6,marginBottom:16,borderBottom:'1.5px solid var(--border)',flexWrap:'wrap'}}>
+              {[['osnovni','👤 Osnovni podaci'],['statistika','📊 Statistika'],['povijest',`📋 Povijest (${selEntries.length})`],['preporuke',`🤝 Preporuke (${(referralsOf[selClient.id]||[]).length})`]].map(([k,l])=>(
                 <button key={k} onClick={()=>setCardTab(k)}
                   style={{border:'none',background:'none',padding:'8px 12px',fontSize:13,fontWeight:cardTab===k?700:500,
                     color:cardTab===k?'var(--teal)':'#888',borderBottom:cardTab===k?'2.5px solid var(--teal)':'2.5px solid transparent',cursor:'pointer',marginBottom:-1.5}}>
@@ -3586,16 +3713,16 @@ function Klijentice({ data, salonId, onRefresh }) {
               {/* Podaci koji dolaze u sljedećim fazama / iz Zoyye — pošteno prazno stanje, bez izmišljanja */}
               <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
                 {[
-                  ['Otkazani termini','iz Zoyye'],
-                  ['Nedolasci','iz Zoyye'],
-                  ['Preporučene klijentice','Faza 2'],
-                  ['Trenutačni bodovi','Faza 3'],
-                  ['Razina lojalnosti','Faza 5'],
-                ].map(([l,tag])=>(
-                  <div key={l} style={{background:'#FAFAFA',border:'1px dashed var(--border)',borderRadius:8,padding:'8px 10px',textAlign:'center'}}>
-                    <div style={{fontSize:10.5,color:'#999'}}>{l}</div>
-                    <div style={{fontWeight:700,color:'#ccc',fontSize:15}}>—</div>
-                    <div style={{fontSize:9,color:'#bbb'}}>{tag}</div>
+                  ['Otkazani termini','iz Zoyye', null],
+                  ['Nedolasci','iz Zoyye', null],
+                  ['Preporučene klijentice','', (referralsOf[selClient.id]||[]).length],
+                  ['Trenutačni bodovi','Faza 3', null],
+                  ['Razina lojalnosti','Faza 5', null],
+                ].map(([l,tag,val])=>(
+                  <div key={l} style={{background:val!=null?'var(--teal-l)':'#FAFAFA',border:val!=null?'none':'1px dashed var(--border)',borderRadius:8,padding:'8px 10px',textAlign:'center'}}>
+                    <div style={{fontSize:10.5,color:val!=null?'#666':'#999'}}>{l}</div>
+                    <div style={{fontWeight:700,color:val!=null?'var(--teal)':'#ccc',fontSize:15}}>{val!=null?val:'—'}</div>
+                    {tag && <div style={{fontSize:9,color:'#bbb'}}>{tag}</div>}
                   </div>
                 ))}
               </div>
@@ -3653,6 +3780,76 @@ function Klijentice({ data, salonId, onRefresh }) {
               })()}
             </div>
             )}
+
+            {/* ── TAB: Preporuke ── */}
+            {cardTab==='preporuke' && (()=>{
+              const referrer = selClient.referredBy ? clientById[selClient.referredBy] : null;
+              const referred = referralsOf[selClient.id] || [];
+              const totalRefValue = referred.reduce((s,c)=>s+(c.totalSpent||0),0);
+              const picker = refSearch.trim().length>=2
+                ? clientsWithStats.filter(c => c.id!==selClient.id && normName(c.name).includes(normName(refSearch))).slice(0,8)
+                : [];
+              return (
+              <div>
+                {/* Tko je preporučio ovu klijenticu */}
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:6}}>🤝 Preporučila ju je</div>
+                  {referrer ? (
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'#EDE7F6',borderRadius:8,padding:'8px 12px'}}>
+                      <span style={{fontWeight:700,cursor:'pointer',color:'#5E35B1'}} onClick={()=>{setSelected(referrer.id);setCardTab('preporuke');}}>{referrer.name}</span>
+                      <button className="btn btn-outline btn-sm" onClick={()=>setReferrer(selClient.id,'')}>✕ ukloni</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input value={refSearch} onChange={e=>setRefSearch(e.target.value)} placeholder="🔍 upiši ime klijentice koja ju je preporučila..."
+                        style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13}} />
+                      {picker.length>0 && (
+                        <div style={{border:'1px solid var(--border)',borderRadius:8,marginTop:4,maxHeight:180,overflowY:'auto'}}>
+                          {picker.map(c=>(
+                            <div key={c.id} onClick={()=>{setReferrer(selClient.id,c.id);setRefSearch('');}}
+                              style={{padding:'8px 12px',cursor:'pointer',borderBottom:'1px solid var(--border)',fontSize:13}}
+                              className="client-row">
+                              <span style={{fontWeight:600}}>{c.name}</span>
+                              <span style={{color:'#999',marginLeft:8,fontSize:11}}>{c.visits} posjeta · €{fmt(c.totalSpent)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {refSearch.trim().length>=2 && picker.length===0 && <p style={{fontSize:12,color:'#aaa',marginTop:6}}>Nema rezultata.</p>}
+                    </div>
+                  )}
+                </div>
+
+                {/* Klijentice koje je ONA preporučila */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'#666'}}>👥 Preporučila je ({referred.length})</div>
+                  {referred.length>0 && <div style={{fontSize:12,color:'#666'}}>Ukupna vrijednost: <strong style={{color:'var(--green)'}}>€{fmt(totalRefValue)}</strong></div>}
+                </div>
+                {referred.length===0 ? (
+                  <p style={{color:'#aaa',fontSize:13}}>Još nije nikoga preporučila. Kad povežeš novu klijenticu s njom kao preporučiteljicom, pojavit će se ovdje.</p>
+                ) : (
+                  <div style={{overflowX:'auto'}}>
+                    <table>
+                      <thead><tr><th>Klijentica</th><th>Prvi dolazak</th><th style={{textAlign:'right'}}>Posjeta</th><th style={{textAlign:'right'}}>Promet</th><th>Status</th><th style={{textAlign:'right'}}>Bodovi</th></tr></thead>
+                      <tbody>
+                        {referred.map((c,i)=>{ const rs=effReferralStatus(c); return (
+                          <tr key={c.id} className={i%2===1?'tr-alt':''}>
+                            <td style={{fontWeight:600,cursor:'pointer',color:'var(--teal)'}} onClick={()=>{setSelected(c.id);setCardTab('preporuke');}}>{c.name}</td>
+                            <td style={{fontSize:12,whiteSpace:'nowrap'}}>{c.firstVisit?fmtDate(c.firstVisit):'—'}</td>
+                            <td style={{textAlign:'right'}}>{c.visits}</td>
+                            <td style={{textAlign:'right',color:'var(--green)',fontWeight:600}}>€{fmt(c.totalSpent)}</td>
+                            <td><span style={{fontSize:10.5,fontWeight:700,background:(REFERRAL_STATUS_COLORS[rs]||'#888')+'22',color:REFERRAL_STATUS_COLORS[rs]||'#888',padding:'2px 8px',borderRadius:10,whiteSpace:'nowrap'}}>{rs}</span></td>
+                            <td style={{textAlign:'right',color:'#ccc'}}>—</td>
+                          </tr>
+                        ); })}
+                      </tbody>
+                    </table>
+                    <p style={{fontSize:11,color:'#aaa',marginTop:8}}>Bodovi se obračunavaju od Faze 3 (bodovni sustav). Status se računa automatski iz aktivnosti preporučene klijentice.</p>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
           </div>
         )}
 
