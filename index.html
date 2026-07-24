@@ -517,6 +517,8 @@ function NoviUnos({ data, salonId, onRefresh }) {
   const [toast, setToast] = useState(null);
   const [stockWarning, setStockWarning] = useState(null);
   const [keepClient, setKeepClient] = useState(false);
+  const [newModal, setNewModal] = useState(null);   // {source, phone, referrerId} kad je nova klijentica
+  const [nmRefSearch, setNmRefSearch] = useState(''); // tražilica preporučiteljice u prozoru
 
   useEffect(() => {
     const p=parseFloat(form.price)||0, q=parseFloat(form.quantity)||1, d=parseFloat(form.discount)||0;
@@ -554,17 +556,16 @@ function NoviUnos({ data, salonId, onRefresh }) {
   const handleStaff = (s) => set('staff', s.name || s);
   const handleClient = (s) => set('clientName', s.name || s);
 
-  const handleSave = () => {
-    if (!form.clientName.trim()) { setToast({msg:'Unesite ime klijentice!',type:'error'}); return; }
-    if (!form.service.trim())    { setToast({msg:'Odaberite uslugu!',type:'error'}); return; }
+  // Stvarni upis. extra = {source, phone, referrerId} kod nove klijentice (iz iskočnog prozora)
+  const doSave = (extra) => {
     // ── Veza po ID-u: nađi postojeću klijenticu (po imenu/aliasu) ili kreiraj novu ──
     const key = normName(form.clientName);
     let clients = data.clients || [];
     let client = clientByName[key];
     if (!client) {
-      client = { id: uid(), name: form.clientName.trim(), email:'', phone:'', birthday:'',
+      client = { id: uid(), name: form.clientName.trim(), email:'', phone: (extra&&extra.phone)||'', birthday:'',
         notes:'', preferences:'', personality:'', source:'promet',
-        dolazak: form.arrivalSource||'', status:'', referredBy:'', aliases:[], tags:[],
+        dolazak: (extra&&extra.source)||'', status:'', referredBy: (extra&&extra.referrerId)||'', aliases:[], tags:[],
         createdAt: new Date().toISOString() };
       clients = [...clients, client];
     }
@@ -592,7 +593,17 @@ function NoviUnos({ data, salonId, onRefresh }) {
     saveData(nd); onRefresh(nd);
     setToast({msg:'Unos spremljen! €'+fmt(total)});
     setStockWarning(null);
+    setNewModal(null); setNmRefSearch('');
     setForm(f=>({...f, clientName: keepClient ? f.clientName : '', service:'', price:'', discount:'0', quantity:'1', note:'', arrivalSource:''}));
+  };
+
+  const handleSave = () => {
+    if (!form.clientName.trim()) { setToast({msg:'Unesite ime klijentice!',type:'error'}); return; }
+    if (!form.service.trim())    { setToast({msg:'Odaberite uslugu!',type:'error'}); return; }
+    // Ako je ime NOVO (nema karton) → otvori prozor za izvor dolaska; inače spremi odmah
+    const isNew = !clientByName[normName(form.clientName)];
+    if (isNew) { setNewModal({source:'', phone:'', referrerId:''}); return; }
+    doSave(null);
   };
 
   const salonColor = salonId==='all'
@@ -633,13 +644,10 @@ function NoviUnos({ data, salonId, onRefresh }) {
               suggestions={clientNames.map(n=>({name:n}))} placeholder="Unesite ime..." />
           </div>
           {isNewClient && (
-            <div className="form-group">
-              <label>🌟 Nova klijentica — kako je došla?</label>
-              <select value={form.arrivalSource} onChange={e=>set('arrivalSource',e.target.value)}
-                style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--gold)',borderRadius:8,fontSize:14,background:'#FFFDF5'}}>
-                <option value="">— odaberi (nije obavezno) —</option>
-                {getArrivalSources(data).map(s=><option key={s} value={s}>{s}</option>)}
-              </select>
+            <div className="form-group" style={{display:'flex',alignItems:'flex-end'}}>
+              <div style={{background:'#FFFDF5',border:'1.5px solid var(--gold)',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#856404',width:'100%'}}>
+                🌟 <strong>Nova klijentica.</strong> Kod spremanja pitat ćemo kako je došla.
+              </div>
             </div>
           )}
           <div className="form-group">
@@ -692,6 +700,70 @@ function NoviUnos({ data, salonId, onRefresh }) {
           </label>
         </div>
       </div>
+
+      {/* ── Iskočni prozor: nova klijentica → izvor dolaska ── */}
+      {newModal && (
+        <div onClick={()=>{setNewModal(null);setNmRefSearch('');}}
+          style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div onClick={e=>e.stopPropagation()}
+            style={{background:'#fff',borderRadius:16,padding:24,maxWidth:440,width:'100%',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 12px 40px rgba(0,0,0,0.3)'}}>
+            <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>🌟 Nova klijentica</div>
+            <div style={{fontSize:14,color:'#666',marginBottom:16}}><strong>{form.clientName}</strong> — kako je došla do nas?</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:16}}>
+              {getArrivalSources(data).map(s=>(
+                <button key={s} onClick={()=>setNewModal(m=>({...m,source: m.source===s?'':s, referrerId: s==='Preporuka'?m.referrerId:''}))}
+                  style={{padding:'12px 10px',borderRadius:10,fontSize:14,fontWeight:600,cursor:'pointer',
+                    border: newModal.source===s?'2px solid var(--teal)':'1.5px solid var(--border)',
+                    background: newModal.source===s?'var(--teal-l)':'#fff', color: newModal.source===s?'var(--teal)':'#333'}}>
+                  {s}
+                </button>
+              ))}
+            </div>
+            {newModal.source==='Preporuka' && (()=>{
+              const chosen = newModal.referrerId ? (data.clients||[]).find(c=>c.id===newModal.referrerId) : null;
+              const results = nmRefSearch.trim().length>=2
+                ? (data.clients||[]).filter(c=>normName(c.name).includes(normName(nmRefSearch))).slice(0,6) : [];
+              return (
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:6}}>🤝 Tko ju je preporučio? (nije obavezno)</div>
+                  {chosen ? (
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#EDE7F6',borderRadius:8,padding:'8px 12px'}}>
+                      <span style={{fontWeight:700,color:'#5E35B1'}}>{chosen.name}</span>
+                      <button className="btn btn-outline btn-sm" onClick={()=>setNewModal(m=>({...m,referrerId:''}))}>✕</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <input value={nmRefSearch} onChange={e=>setNmRefSearch(e.target.value)} placeholder="🔍 ime preporučiteljice..."
+                        style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13}} />
+                      {results.length>0 && (
+                        <div style={{border:'1px solid var(--border)',borderRadius:8,marginTop:4,maxHeight:150,overflowY:'auto'}}>
+                          {results.map(c=>(
+                            <div key={c.id} onClick={()=>{setNewModal(m=>({...m,referrerId:c.id}));setNmRefSearch('');}}
+                              style={{padding:'8px 12px',cursor:'pointer',borderBottom:'1px solid var(--border)',fontSize:13,fontWeight:600}} className="client-row">
+                              {c.name}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            <div style={{marginBottom:18}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:6}}>📞 Telefon (nije obavezno)</div>
+              <input value={newModal.phone} onChange={e=>setNewModal(m=>({...m,phone:e.target.value}))} placeholder="npr. 099..."
+                style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
+            </div>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button className="btn btn-primary" style={{flex:1,minWidth:120,background:salonColor}} onClick={()=>doSave(newModal)}>✓ Spremi unos</button>
+              <button className="btn btn-outline" onClick={()=>doSave({source:'',phone:newModal.phone,referrerId:''})}>Preskoči</button>
+              <button className="btn btn-sm" style={{background:'#eee'}} onClick={()=>{setNewModal(null);setNmRefSearch('');}}>Odustani</button>
+            </div>
+            <div style={{fontSize:11,color:'#aaa',marginTop:10}}>Izvor se sprema na karton klijentice — koristi se za statistiku „odakle nam klijentice dolaze".</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
