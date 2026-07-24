@@ -725,7 +725,7 @@ function NoviUnos({ data, salonId, onRefresh }) {
                 ? (data.clients||[]).filter(c=>normName(c.name).includes(normName(nmRefSearch))).slice(0,6) : [];
               return (
                 <div style={{marginBottom:16}}>
-                  <div style={{fontSize:12,fontWeight:700,color:'#666',marginBottom:6}}>🤝 Tko ju je preporučio? (nije obavezno)</div>
+                  <div style={{fontSize:12,fontWeight:700,color: newModal.referrerId?'#666':'var(--red)',marginBottom:6}}>🤝 Tko ju je preporučio? {newModal.referrerId?'':'(obavezno)'}</div>
                   {chosen ? (
                     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#EDE7F6',borderRadius:8,padding:'8px 12px'}}>
                       <span style={{fontWeight:700,color:'#5E35B1'}}>{chosen.name}</span>
@@ -756,7 +756,11 @@ function NoviUnos({ data, salonId, onRefresh }) {
                 style={{width:'100%',padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14}} />
             </div>
             <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-              <button className="btn btn-primary" style={{flex:1,minWidth:120,background:salonColor}} onClick={()=>doSave(newModal)}>✓ Spremi unos</button>
+              <button className="btn btn-primary" style={{flex:1,minWidth:120,background:salonColor}}
+                onClick={()=>{
+                  if(newModal.source==='Preporuka' && !newModal.referrerId){ setToast({msg:'Kod preporuke obavezno odaberi tko ju je preporučio.',type:'error'}); return; }
+                  doSave(newModal);
+                }}>✓ Spremi unos</button>
               <button className="btn btn-outline" onClick={()=>doSave({source:'',phone:newModal.phone,referrerId:''})}>Preskoči</button>
               <button className="btn btn-sm" style={{background:'#eee'}} onClick={()=>{setNewModal(null);setNmRefSearch('');}}>Odustani</button>
             </div>
