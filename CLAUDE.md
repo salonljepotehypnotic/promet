@@ -171,3 +171,14 @@ Referrals + duplicate merge.
 - Card tab bar wraps (flexWrap) so 4th tab is reachable on mobile.
 - Verified: compile clean, Preporuke + Duplikati render on real data (67 candidate groups); merge & circular-guard logic unit-tested (13/13). Not tested by executing a live merge (Firebase is production).
 
+### AI Financijski agent (Jul 2026)
+
+- Novi admin tab **✦ Financije** čita postojeće `entries` i `expenses` iz istog Firebase `/hypnotic` skupa podataka; nema odvojene baze ni paralelne evidencije.
+- Prati promet (uz postojeća pravila protiv dvostrukog brojanja), dobit, troškove, maržu, plaće, novčani tok, akontacije, dugovanja te poreze i doprinose.
+- Prima fotografije i PDF račune. Tesseract OCR + PDF.js lokalno u pregledniku prepoznaju dobavljača, datum, ukupan iznos, PDV, OIB, broj računa i način plaćanja te automatski predlažu kategoriju.
+- Računi s 90%+ sigurnosti mogu se automatski knjižiti; ostali obavezno idu na kratku provjeru. SHA-256 otisak datoteke sprječava dvostruko knjiženje iste datoteke.
+- Knjiženi račun postaje običan zapis u `expenses` s dodatnim kompatibilnim poljima: `paymentStatus`, `paidAmount`, `paidDate`, `dueDate`, `paymentMethod`, `documentNumber`, `supplierOib`, `vatAmount`, `source:'ai-racun'`, `receiptFileName`, `receiptFingerprint`, `ocrConfidence` i skraćeni `ocrText`.
+- Stari troškovi bez `paymentStatus` tretiraju se kao plaćeni, tako da novčani tok ostaje kompatibilan sa starim podacima.
+- Ručni unos i uređivanje troška sada podržavaju status Plaćeno/Dugovanje, dospijeće, broj računa, PDV te nove kategorije `POREZI I DOPRINOSI` i `ISPLATE`.
+- Financije prikazuju upozorenja za dospjela dugovanja, nisku maržu, visok udio plaća i negativan novčani tok te omogućuju označavanje obveze plaćenom i Excel izvoz.
+- Verified: full Babel compile clean; parser računa unit-tested na HR formatu (`1.234,56`, datum, OIB, PDV, broj računa, kategorija i confidence).

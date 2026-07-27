@@ -9,6 +9,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:#F0F2F5;color:#1A1A2E;min-height:100vh}
@@ -106,6 +108,65 @@ tr:hover td{background:#F8FCFC}
 .pin-change-row input{width:110px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;outline:none;letter-spacing:3px}
 .pin-change-row input:focus{border-color:var(--teal)}
 @media(max-width:600px){.main{padding:12px}.form-grid{grid-template-columns:1fr 1fr}.stat-grid{grid-template-columns:1fr 1fr}}
+
+/* AI FINANCIJSKI AGENT */
+.finance-page{--fin-ink:#172632;--fin-mint:#E7F6F2;--fin-blue:#EAF1FF;--fin-warm:#FFF7E8}
+.finance-hero{position:relative;overflow:hidden;background:linear-gradient(125deg,#142A35 0%,#0D7377 72%,#31A68D 100%);color:#fff;border-radius:20px;padding:26px 28px;margin-bottom:18px;box-shadow:0 12px 32px rgba(13,115,119,.18)}
+.finance-hero:after{content:'';position:absolute;width:240px;height:240px;border-radius:50%;right:-70px;top:-120px;background:rgba(255,255,255,.08)}
+.finance-kicker{font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:#92E5D0;margin-bottom:7px}
+.finance-title{font-size:27px;line-height:1.12;font-weight:850;letter-spacing:-.5px;margin-bottom:8px}
+.finance-copy{font-size:13px;line-height:1.55;color:rgba(255,255,255,.8);max-width:650px}
+.finance-live{position:absolute;right:24px;bottom:22px;display:flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid rgba(255,255,255,.2);border-radius:99px;background:rgba(10,35,42,.28);font-size:11px;font-weight:700}
+.finance-live i{width:7px;height:7px;border-radius:50%;background:#73F0BF;box-shadow:0 0 0 4px rgba(115,240,191,.13)}
+.finance-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:16px}
+.finance-toolbar .spacer{margin-left:auto}
+.finance-select{padding:8px 11px;border:1.5px solid var(--border);border-radius:9px;background:#fff;color:var(--dark);font:inherit;font-size:13px;outline:none}
+.finance-select:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(13,115,119,.08)}
+.finance-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.finance-metric{background:#fff;border:1px solid #E6EAED;border-radius:14px;padding:16px;min-width:0;box-shadow:0 2px 8px rgba(23,38,50,.04)}
+.finance-metric-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.finance-metric-icon{width:31px;height:31px;border-radius:9px;display:grid;place-items:center;font-size:15px}
+.finance-metric-label{font-size:10px;letter-spacing:.7px;text-transform:uppercase;color:#71808A;font-weight:800}
+.finance-metric-value{font-size:23px;line-height:1;font-weight:850;color:var(--fin-ink);letter-spacing:-.45px;white-space:nowrap}
+.finance-metric-note{font-size:11px;color:#88949B;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.finance-agent-grid{display:grid;grid-template-columns:minmax(0,1.16fr) minmax(330px,.84fr);gap:16px;margin-bottom:18px}
+.finance-panel{background:#fff;border:1px solid #E4E9EC;border-radius:16px;padding:20px;box-shadow:0 2px 9px rgba(23,38,50,.04)}
+.finance-panel-title{font-size:16px;font-weight:800;color:var(--fin-ink);display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.finance-panel-sub{font-size:12px;color:#7A8992;line-height:1.45;margin-bottom:15px}
+.receipt-drop{border:2px dashed #9DCFC4;border-radius:14px;padding:24px 18px;text-align:center;background:linear-gradient(180deg,#F8FFFD 0%,#F0FAF7 100%);transition:.2s;cursor:pointer;outline:none}
+.receipt-drop:hover,.receipt-drop.dragging,.receipt-drop:focus{border-color:var(--teal);background:#E7F6F2;box-shadow:0 0 0 4px rgba(13,115,119,.07)}
+.receipt-drop-icon{width:48px;height:48px;border-radius:14px;background:#D8F1EA;color:var(--teal);display:grid;place-items:center;margin:0 auto 10px;font-size:24px}
+.receipt-drop strong{display:block;font-size:14px;color:var(--fin-ink);margin-bottom:4px}
+.receipt-drop span{font-size:11px;color:#7C8B93}
+.receipt-actions{display:flex;gap:8px;justify-content:center;margin-top:13px;flex-wrap:wrap}
+.receipt-progress{margin-top:14px;background:#F3F6F7;border-radius:12px;padding:13px 14px;text-align:left}
+.receipt-progress-row{display:flex;justify-content:space-between;font-size:11px;font-weight:700;color:#51626B;margin-bottom:8px}
+.receipt-progress-track{height:7px;border-radius:99px;background:#DDE6E8;overflow:hidden}
+.receipt-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--teal),#4BC9A8);transition:width .25s}
+.agent-insight{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid #EEF1F2}
+.agent-insight:last-child{border-bottom:0}
+.agent-insight-icon{flex:0 0 31px;height:31px;border-radius:9px;display:grid;place-items:center;background:#EEF8F6}
+.agent-insight strong{display:block;font-size:12px;color:var(--fin-ink);margin-bottom:2px}
+.agent-insight p{font-size:11px;color:#79868E;line-height:1.4;margin:0}
+.review-layout{display:grid;grid-template-columns:180px 1fr;gap:18px;align-items:start}
+.receipt-preview{height:235px;border-radius:12px;background:#F1F3F4;overflow:hidden;display:grid;place-items:center;border:1px solid #E2E6E8}
+.receipt-preview img{width:100%;height:100%;object-fit:contain;background:#fff}
+.receipt-preview-file{text-align:center;padding:16px;color:#6C7B84;font-size:12px;word-break:break-word}
+.confidence{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:99px;font-size:11px;font-weight:800}
+.finance-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.finance-form-grid .form-group{min-width:0}
+.finance-form-grid .wide{grid-column:1/-1}
+.finance-table-status{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border-radius:99px;font-size:10px;font-weight:800;white-space:nowrap}
+.finance-bars{display:flex;align-items:flex-end;gap:7px;height:130px;padding-top:12px}
+.finance-bar-col{height:100%;flex:1;min-width:30px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.finance-bar-stack{width:100%;height:92px;display:flex;align-items:flex-end;justify-content:center;gap:3px}
+.finance-bar{width:35%;min-width:7px;border-radius:5px 5px 2px 2px;transition:.2s}
+.finance-bar-label{font-size:9px;color:#87949B;white-space:nowrap}
+.finance-empty{padding:24px;text-align:center;color:#8B979E;font-size:12px;background:#F8FAFA;border-radius:12px}
+.finance-checkbox{display:flex;gap:8px;align-items:flex-start;font-size:11px;color:#63737C;line-height:1.35;margin-top:11px;cursor:pointer}
+.finance-checkbox input{margin-top:1px;accent-color:var(--teal)}
+@media(max-width:980px){.finance-agent-grid{grid-template-columns:1fr}.finance-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-live{position:static;margin-top:15px;width:max-content}.review-layout{grid-template-columns:1fr}.receipt-preview{height:190px}}
+@media(max-width:600px){.finance-hero{padding:22px 19px;border-radius:16px}.finance-title{font-size:23px}.finance-metrics{grid-template-columns:1fr 1fr;gap:8px}.finance-metric{padding:13px}.finance-metric-value{font-size:18px}.finance-agent-grid{grid-template-columns:1fr}.finance-panel{padding:15px}.finance-form-grid{grid-template-columns:1fr}.finance-form-grid .wide{grid-column:auto}.finance-toolbar .spacer{display:none}.finance-select{flex:1;min-width:120px}}
 </style>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
@@ -4219,8 +4280,8 @@ function Klijentice({ data, salonId, onRefresh, activeStaff }) {
 }
 
 // ─── Troškovi (Expenses) ──────────────────────────────────────────────────
-const EXPENSE_CATEGORIES = ['PLAĆA','FIKSNI TROŠKOVI','MATERIJAL','MARKETING','EDUKACIJA','OSTALO'];
-const EXPENSE_CAT_COLORS = {'PLAĆA':'#E74C3C','FIKSNI TROŠKOVI':'#E67E22','MATERIJAL':'#3498DB','MARKETING':'#9B59B6','EDUKACIJA':'#1ABC9C','OSTALO':'#95A5A6'};
+const EXPENSE_CATEGORIES = ['PLAĆA','ISPLATE','POREZI I DOPRINOSI','FIKSNI TROŠKOVI','MATERIJAL','MARKETING','EDUKACIJA','OSTALO'];
+const EXPENSE_CAT_COLORS = {'PLAĆA':'#E74C3C','ISPLATE':'#C0392B','POREZI I DOPRINOSI':'#C58A12','FIKSNI TROŠKOVI':'#E67E22','MATERIJAL':'#3498DB','MARKETING':'#9B59B6','EDUKACIJA':'#1ABC9C','OSTALO':'#95A5A6'};
 
 // ─── Provjera prometa ─────────────────────────────────────────────────────
 function Provjera({ data, salonId, saveData, onRefresh }) {
@@ -4867,6 +4928,339 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
   );
 }
 
+// ─── AI Financijski agent ────────────────────────────────────────────────
+const FINANCE_REVENUE_EXCLUDE = new Set(['IZ PAKETA','POKLON BON-odrađeno']);
+const isSalaryExpense = e => {
+  const hay = `${e.category||''} ${e.subcategory||''} ${e.note||''}`.toUpperCase();
+  return e.category==='PLAĆA' || e.category==='ISPLATE' || /PLAĆ|PLACE|HONORAR|ISPLATA ZAPOSLEN/.test(hay);
+};
+const isTaxExpense = e => {
+  const hay = `${e.category||''} ${e.subcategory||''} ${e.note||''}`.toUpperCase();
+  return e.category==='POREZI I DOPRINOSI' || /POREZ|PDV|PRIREZ|DOPRINOS|POREZNA/.test(hay);
+};
+const expensePaidAmount = e => {
+  const status = e.paymentStatus || 'placeno'; // stari zapisi su već plaćeni troškovi
+  if (status==='neplaceno') return 0;
+  if (status==='djelomicno') return Math.min(Number(e.amount||0), Number(e.paidAmount||0));
+  return Number(e.amount||0);
+};
+const expenseDebtAmount = e => Math.max(0, Number(e.amount||0)-expensePaidAmount(e));
+
+function parseReceiptAmount(value) {
+  let s = String(value||'').replace(/\s/g,'').replace(/[^0-9,.-]/g,'');
+  if (!s) return 0;
+  const lastComma=s.lastIndexOf(','), lastDot=s.lastIndexOf('.');
+  if (lastComma>=0 && lastDot>=0) {
+    const dec = lastComma>lastDot ? ',' : '.';
+    s = dec===',' ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  } else if (lastComma>=0) {
+    const digitsAfter=s.length-lastComma-1;
+    s = digitsAfter<=2 ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+  } else if (lastDot>=0) {
+    const digitsAfter=s.length-lastDot-1;
+    if (digitsAfter===3) s=s.replace(/\./g,'');
+  }
+  return Number.parseFloat(s)||0;
+}
+
+function receiptISODate(raw) {
+  const m=String(raw||'').match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);
+  if(!m) return '';
+  let y=Number(m[3]); if(y<100) y+=2000;
+  const mo=Number(m[2]), d=Number(m[1]);
+  if(y<2000||y>2100||mo<1||mo>12||d<1||d>31) return '';
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+function classifyReceipt(text) {
+  const t=String(text||'').toUpperCase();
+  if(/PLAĆA|PLACA|HONORAR|NETO PLAĆ|BRUTO PLAĆ/.test(t)) return 'PLAĆA';
+  if(/POREZNA UPRAVA|POREZ NA DOBIT|POREZ NA DOHODAK|AKONTACIJA POREZA|PRIREZ|DOPRINOS|PDV OBRAČUN|PDV OBRACUN/.test(t)) return 'POREZI I DOPRINOSI';
+  if(/FACEBOOK|META ADS|GOOGLE ADS|OGLAŠAVAN|OGLASAVAN|MARKETING|PROMOCI/.test(t)) return 'MARKETING';
+  if(/EDUKACI|SEMINAR|TEČAJ|TECAJ|RADIONIC|KOTIZACI/.test(t)) return 'EDUKACIJA';
+  if(/NAJAM|ZAKUP|STRUJA|HEP|VODA|PLIN|INTERNET|TELEFON|KOMUNAL|PRIČUVA|PRICUVA/.test(t)) return 'FIKSNI TROŠKOVI';
+  if(/KOZMET|MATERIJAL|RUKAVIC|VOSAK|GEL |KREMA|SERUM|DEZINFEK|POTROŠN|POTROSN|OPREMA/.test(t)) return 'MATERIJAL';
+  return 'OSTALO';
+}
+
+function parseReceiptText(text, fileName='') {
+  const clean=String(text||'').replace(/\r/g,'\n').replace(/[ \t]+/g,' ').trim();
+  const lines=clean.split(/\n+/).map(l=>l.trim()).filter(Boolean);
+  const upper=clean.toUpperCase();
+  const ignored=/^(RAČUN|RACUN|FISKALNI|R-?1|OIB|IBAN|DATUM|VRIJEME|BLAGAJNIK|KUPAC|POSLOVNICA|UKUPNO|TOTAL|HVALA|REPUBLIKA)/i;
+  const legal=/\b(D\.?O\.?O\.?|J\.?D\.?O\.?O\.?|OBRT|TRGOVINA|USTANOVA|DIONIČKO|DIONICKO)\b/i;
+  const supplier=(lines.slice(0,12).find(l=>legal.test(l)) || lines.slice(0,9).find(l=>l.length>=3&&l.length<=70&&/[A-Za-zČĆŽŠĐčćžšđ]{3}/.test(l)&&!ignored.test(l)) || '').replace(/^[-–—\s]+|[-–—\s]+$/g,'');
+
+  const dateLine=lines.find(l=>/DATUM(?: I VRIJEME)?(?: RAČUNA| IZDAVANJA)?/i.test(l)&&receiptISODate(l));
+  const genericDate=lines.find(l=>receiptISODate(l) && !/DOSPIJE/i.test(l));
+  const date=receiptISODate(dateLine||genericDate||'') || today();
+  const dueLine=lines.find(l=>/DOSPIJE|ROK PLAĆANJA|ROK PLACANJA/i.test(l)&&receiptISODate(l));
+  const dueDate=receiptISODate(dueLine||'');
+
+  const amountLabels=/(SVEUKUPNO|UKUPNO ZA PLATITI|ZA PLATITI|UKUPAN IZNOS|IZNOS ZA PLAĆANJE|IZNOS ZA PLACANJE|GRAND TOTAL|TOTAL)/i;
+  const amountLine=[...lines].reverse().find(l=>amountLabels.test(l) && !/PDV|POREZ|OSNOVIC/i.test(l) && /\d[\d.,]*\s*(€|EUR|KN)?/i.test(l));
+  const amountsFromLine=amountLine ? (amountLine.match(/-?\d[\d.\s]*[,.]\d{2}|-?\d+[,.]\d{2}|-?\d+/g)||[]) : [];
+  let amount=amountsFromLine.length ? parseReceiptAmount(amountsFromLine[amountsFromLine.length-1]) : 0;
+  if(!amount) {
+    const all=(clean.match(/\b\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})\b|\b\d+[.]\d{2}\b/g)||[]).map(parseReceiptAmount).filter(n=>n>0&&n<1000000);
+    amount=all.length?Math.max(...all):0;
+  }
+
+  const vatLine=lines.find(l=>/\b(PDV|VAT)\b/i.test(l)&&/\d[\d.,]*/.test(l));
+  const vatAmounts=vatLine?(vatLine.match(/\d[\d.\s]*[,.]\d{2}/g)||[]):[];
+  const vatAmount=vatAmounts.length?parseReceiptAmount(vatAmounts[vatAmounts.length-1]):0;
+  const oibMatch=upper.match(/OIB\s*[:#]?\s*(\d{11})/) || upper.match(/\b(\d{11})\b/);
+  const docMatch=clean.match(/(?:BROJ RAČUNA|BROJ RACUNA|RAČUN BR\.?|RACUN BR\.?|BR\. RAČUNA|BR\. RACUNA|BROJ DOKUMENTA|INVOICE NO\.?)\s*[:#]?\s*([A-Z0-9\/-]{3,})/i);
+  const paymentMethod=/GOTOVIN/i.test(upper)?'GOTOVINA':/KARTIC|MASTERCARD|VISA/i.test(upper)?'KARTICA':/TRANSAKCI|VIRMAN|IBAN|UPLATA NA RAČUN|UPLATA NA RACUN/i.test(upper)?'TRANSAKCIJSKI RAČUN':'KARTICA';
+  const category=classifyReceipt(clean);
+  const descriptions={'PLAĆA':'Plaća / honorar','POREZI I DOPRINOSI':'Porez ili doprinos','MARKETING':'Marketing i oglašavanje','EDUKACIJA':'Edukacija','FIKSNI TROŠKOVI':'Fiksni trošak','MATERIJAL':'Materijal i potrošni proizvodi','OSTALO':'Račun'};
+  let confidence=0;
+  if(supplier) confidence+=20;
+  if(amount>0) confidence+=35;
+  if(dateLine||genericDate) confidence+=20;
+  if(docMatch) confidence+=15;
+  if(oibMatch) confidence+=10;
+  return {supplier,amount,date,dueDate,vatAmount,documentNumber:docMatch?docMatch[1]:'',oib:oibMatch?oibMatch[1]:'',paymentMethod,category,description:descriptions[category],confidence,rawText:clean,fileName};
+}
+
+async function receiptFingerprint(file) {
+  try {
+    const hash=await crypto.subtle.digest('SHA-256',await file.arrayBuffer());
+    return [...new Uint8Array(hash)].slice(0,16).map(b=>b.toString(16).padStart(2,'0')).join('');
+  } catch(e) {
+    return `${file.name}-${file.size}-${file.lastModified}`;
+  }
+}
+
+async function recognizeReceiptImage(source, onProgress, from=0, span=100) {
+  if(!window.Tesseract) throw new Error('Čitač računa se nije učitao. Provjerite internetsku vezu.');
+  const logger=m=>{if(m.status==='recognizing text') onProgress(from+Math.round((m.progress||0)*span),'Čitam tekst s računa…');};
+  try {
+    const r=await window.Tesseract.recognize(source,'hrv+eng',{logger});
+    return r.data.text||'';
+  } catch(e) {
+    const r=await window.Tesseract.recognize(source,'eng',{logger});
+    return r.data.text||'';
+  }
+}
+
+async function extractReceiptText(file, onProgress) {
+  if(file.type==='application/pdf' || /\.pdf$/i.test(file.name)) {
+    if(!window.pdfjsLib) throw new Error('PDF čitač se nije učitao. Provjerite internetsku vezu.');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    onProgress(8,'Otvaram PDF račun…');
+    const pdf=await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+    const pages=Math.min(pdf.numPages,3);
+    let result='';
+    for(let i=1;i<=pages;i++) {
+      const page=await pdf.getPage(i);
+      const content=await page.getTextContent();
+      let pageText=content.items.map(x=>x.str).join('\n').trim();
+      if(pageText.length<70) {
+        const viewport=page.getViewport({scale:1.7});
+        const canvas=document.createElement('canvas');
+        canvas.width=viewport.width; canvas.height=viewport.height;
+        await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+        pageText=await recognizeReceiptImage(canvas,onProgress,15+((i-1)/pages)*75,75/pages);
+      } else onProgress(15+Math.round(i/pages*70),`Čitam stranicu ${i} od ${pages}…`);
+      result+='\n'+pageText;
+    }
+    onProgress(94,'Prepoznajem iznose i podatke…');
+    return result;
+  }
+  onProgress(5,'Pripremam fotografiju…');
+  return recognizeReceiptImage(file,onProgress,8,84);
+}
+
+function FinancijskiAgent({data,salonId,onRefresh}) {
+  const defaultSalon=salonId==='all'?(data.salons[0]?.id||'savska'):salonId;
+  const [filterSalon,setFilterSalon]=useState(salonId==='all'?'':salonId);
+  const [period,setPeriod]=useState(today().slice(0,7));
+  const [uploadState,setUploadState]=useState('idle');
+  const [progress,setProgress]=useState(0);
+  const [progressLabel,setProgressLabel]=useState('');
+  const [dragging,setDragging]=useState(false);
+  const [file,setFile]=useState(null);
+  const [preview,setPreview]=useState('');
+  const [draft,setDraft]=useState(null);
+  const [rawText,setRawText]=useState('');
+  const [error,setError]=useState('');
+  const [toast,setToast]=useState(null);
+  const [lastBooked,setLastBooked]=useState(null);
+  const fileRef=useRef(null), cameraRef=useRef(null);
+  const [autoBook,setAutoBook]=useState(()=>{try{return localStorage.getItem('hypnotic_fin_auto')!=='false';}catch(e){return true;}});
+
+  const setAuto=value=>{setAutoBook(value);try{localStorage.setItem('hypnotic_fin_auto',String(value));}catch(e){}};
+  const expenses=data.expenses||[];
+  const periodEntries=useMemo(()=>data.entries.filter(e=>(!filterSalon||e.salon===filterSalon)&&(e.date||'').startsWith(period)&&!FINANCE_REVENUE_EXCLUDE.has(normPayment(e.payment))),[data.entries,filterSalon,period]);
+  const periodExpenses=useMemo(()=>expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&(e.date||'').startsWith(period)),[expenses,filterSalon,period]);
+  const revenue=periodEntries.reduce((s,e)=>s+Number(e.total||0),0);
+  const costs=periodExpenses.reduce((s,e)=>s+Number(e.amount||0),0);
+  const paidOut=periodExpenses.reduce((s,e)=>s+expensePaidAmount(e),0);
+  const profit=revenue-costs;
+  const margin=revenue?profit/revenue*100:0;
+  const salaries=periodExpenses.filter(isSalaryExpense).reduce((s,e)=>s+Number(e.amount||0),0);
+  const taxes=periodExpenses.filter(isTaxExpense).reduce((s,e)=>s+Number(e.amount||0),0);
+  const advances=periodEntries.filter(e=>normPayment(e.payment)==='AKONTACIJA').reduce((s,e)=>s+Number(e.total||0),0);
+  const debts=expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&expenseDebtAmount(e)>0);
+  const debtTotal=debts.reduce((s,e)=>s+expenseDebtAmount(e),0);
+  const cashFlow=revenue-paidOut;
+
+  const prevPeriod=useMemo(()=>{const [y,m]=period.split('-').map(Number);const d=new Date(y,m-2,1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;},[period]);
+  const prevRevenue=data.entries.filter(e=>(!filterSalon||e.salon===filterSalon)&&(e.date||'').startsWith(prevPeriod)&&!FINANCE_REVENUE_EXCLUDE.has(normPayment(e.payment))).reduce((s,e)=>s+Number(e.total||0),0);
+  const revDelta=prevRevenue?Math.round((revenue-prevRevenue)/prevRevenue*100):null;
+
+  const monthSeries=useMemo(()=>{
+    const [y,m]=period.split('-').map(Number);
+    return Array.from({length:6},(_,idx)=>{
+      const d=new Date(y,m-6+idx,1);
+      const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const rev=data.entries.filter(e=>(!filterSalon||e.salon===filterSalon)&&(e.date||'').startsWith(key)&&!FINANCE_REVENUE_EXCLUDE.has(normPayment(e.payment))).reduce((s,e)=>s+Number(e.total||0),0);
+      const out=expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&(e.date||'').startsWith(key)).reduce((s,e)=>s+Number(e.amount||0),0);
+      return {key,rev,out};
+    });
+  },[data.entries,expenses,filterSalon,period]);
+  const seriesMax=Math.max(1,...monthSeries.flatMap(m=>[m.rev,m.out]));
+
+  const overdue=debts.filter(e=>e.dueDate&&e.dueDate<today()).length;
+  const recentAI=expenses.filter(e=>e.source==='ai-racun'&&(!filterSalon||e.salonId===filterSalon)).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).slice(0,6);
+  const insights=[];
+  if(overdue) insights.push({icon:'!',title:`${overdue} dospjel${overdue===1?'a':'e'} obvez${overdue===1?'a':'e'}`,text:'Označi ih plaćenima čim izvršiš uplatu kako bi novčani tok ostao točan.',tone:'#FFF0EF'});
+  if(revenue>0 && margin<20) insights.push({icon:'↘',title:'Marža traži pažnju',text:`Trenutna marža je ${fmt(margin)}%. Najveći utjecaj imaju troškovi od €${fmt(costs)}.`,tone:'#FFF7E8'});
+  if(revenue>0 && salaries/revenue>.38) insights.push({icon:'%',title:'Udio plaća je povišen',text:`Plaće čine ${fmt(salaries/revenue*100)}% prometa u odabranom mjesecu.`,tone:'#F3EEFF'});
+  if(cashFlow<0) insights.push({icon:'−',title:'Negativan novčani tok',text:`Odljevi su za €${fmt(Math.abs(cashFlow))} veći od priljeva.`,tone:'#FFF0EF'});
+  if(!insights.length) insights.push({icon:'✓',title:'Financije su pod kontrolom',text:'Nema hitnih upozorenja za odabrani mjesec. Agent i dalje prati svaku novu stavku.',tone:'#E9F8F2'});
+
+  const metrics=[
+    {label:'Promet',value:`€${fmt(revenue)}`,note:revDelta==null?'Prvi usporedivi mjesec':`${revDelta>=0?'↑':'↓'} ${Math.abs(revDelta)}% prema prošlom mj.`,icon:'↗',bg:'#E7F6F2',color:'#0D7377'},
+    {label:'Dobit',value:`€${fmt(profit)}`,note:'Promet umanjen za sve troškove',icon:'◆',bg:profit>=0?'#EAF8F0':'#FFF0EF',color:profit>=0?'#27885A':'#D64A43'},
+    {label:'Troškovi',value:`€${fmt(costs)}`,note:`${periodExpenses.length} stavki u mjesecu`,icon:'↓',bg:'#FFF0EF',color:'#D64A43'},
+    {label:'Marža',value:`${fmt(margin)}%`,note:margin>=30?'Zdrava razina':'Cilj: najmanje 30%',icon:'%',bg:'#FFF7E8',color:'#B67A0D'},
+    {label:'Plaće',value:`€${fmt(salaries)}`,note:revenue?`${fmt(salaries/revenue*100)}% prometa`:'U odabranom periodu',icon:'◎',bg:'#F2EDFF',color:'#7154B3'},
+    {label:'Novčani tok',value:`€${fmt(cashFlow)}`,note:`Plaćeni odljevi €${fmt(paidOut)}`,icon:'⇄',bg:'#EAF1FF',color:'#3C68B2'},
+    {label:'Akontacije',value:`€${fmt(advances)}`,note:'Primljene u odabranom mjesecu',icon:'A',bg:'#EEF8F6',color:'#0D7377'},
+    {label:'Dugovanja',value:`€${fmt(debtTotal)}`,note:overdue?`${overdue} dospjelih obveza`:`${debts.length} otvorenih obveza`,icon:'!',bg:debtTotal?'#FFF0EF':'#F1F5F6',color:debtTotal?'#D64A43':'#708089'},
+    {label:'Porezi',value:`€${fmt(taxes)}`,note:'Porezi i doprinosi u mjesecu',icon:'P',bg:'#FFF7E8',color:'#B67A0D'},
+  ];
+
+  const resetUpload=()=>{if(preview)URL.revokeObjectURL(preview);setUploadState('idle');setProgress(0);setFile(null);setPreview('');setDraft(null);setRawText('');setError('');setLastBooked(null);if(fileRef.current)fileRef.current.value='';if(cameraRef.current)cameraRef.current.value='';};
+
+  const saveExpense=(d,sourceText='',automatic=false)=>{
+    if(!d || !Number(d.amount) || !d.date || !d.supplier){setError('Provjeri dobavljača, datum i iznos prije knjiženja.');setUploadState('review');return;}
+    if(d.receiptFingerprint && expenses.some(e=>e.receiptFingerprint===d.receiptFingerprint)){setError('Ovaj račun je već knjižen. Duplikat nije dodan.');setUploadState('error');return;}
+    const amount=Number(d.amount)||0;
+    const status=d.paymentStatus||'placeno';
+    const exp={id:uid(),date:d.date,salonId:d.salonId||defaultSalon,category:d.category||'OSTALO',subcategory:d.description||'Račun',amount,note:d.documentNumber?`Račun ${d.documentNumber}`:'Račun učitan putem AI agenta',type:d.category==='FIKSNI TROŠKOVI'?'fiksni':'varijabilni',dobavljac:d.supplier,paymentStatus:status,paidAmount:status==='placeno'?amount:0,paidDate:status==='placeno'?today():'',dueDate:d.dueDate||'',paymentMethod:d.paymentMethod||'',documentNumber:d.documentNumber||'',supplierOib:d.oib||'',vatAmount:Number(d.vatAmount)||0,source:'ai-racun',receiptFileName:d.fileName||'',receiptMimeType:d.fileType||'',receiptFingerprint:d.receiptFingerprint||'',ocrConfidence:Number(d.confidence)||0,ocrText:String(sourceText||'').slice(0,2500),createdAt:new Date().toISOString()};
+    const nd={...data,expenses:[...expenses,exp]};
+    saveData(nd);onRefresh(nd);setLastBooked(exp);setDraft(null);setUploadState('saved');setProgress(100);setToast({msg:automatic?'Račun je automatski knjižen!':'Račun je knjižen!'});
+  };
+
+  const processFile=async picked=>{
+    if(!picked)return;
+    if(picked.size>15*1024*1024){setError('Datoteka je veća od 15 MB. Pošalji manju fotografiju ili PDF.');setUploadState('error');return;}
+    if(!picked.type.startsWith('image/') && picked.type!=='application/pdf' && !/\.pdf$/i.test(picked.name)){setError('Podržane su fotografije i PDF računi.');setUploadState('error');return;}
+    if(preview)URL.revokeObjectURL(preview);
+    setFile(picked);setPreview(picked.type.startsWith('image/')?URL.createObjectURL(picked):'');setError('');setUploadState('processing');setProgress(2);setProgressLabel('Pripremam račun…');
+    try{
+      const fingerprint=await receiptFingerprint(picked);
+      if(expenses.some(e=>e.receiptFingerprint===fingerprint)){setError('Ovaj račun je već knjižen. Duplikat nije dodan.');setUploadState('error');return;}
+      const text=await extractReceiptText(picked,(p,label)=>{setProgress(Math.min(98,p));setProgressLabel(label);});
+      if(!text.trim())throw new Error('Na računu nisam pronašao čitljiv tekst. Pokušaj s jasnijom fotografijom.');
+      const parsed={...parseReceiptText(text,picked.name),salonId:defaultSalon,paymentStatus:'placeno',fileType:picked.type,receiptFingerprint:fingerprint};
+      setRawText(text);setDraft(parsed);setProgress(100);
+      if(autoBook && parsed.confidence>=90 && parsed.supplier && parsed.amount>0) saveExpense(parsed,text,true);
+      else setUploadState('review');
+    }catch(e){setError(e.message||'Račun nije moguće pročitati. Pokušaj ponovo.');setUploadState('error');}
+  };
+
+  const markPaid=id=>{
+    const nd={...data,expenses:expenses.map(e=>e.id===id?{...e,paymentStatus:'placeno',paidAmount:Number(e.amount||0),paidDate:today()}:e)};
+    saveData(nd);onRefresh(nd);setToast({msg:'Obveza je označena kao plaćena.'});
+  };
+
+  const exportFinance=()=>{
+    const label=`${MONTH_NAMES[Number(period.split('-')[1])]} ${period.split('-')[0]}`;
+    const rows=[['HYPNOTIC — FINANCIJSKI IZVJEŠTAJ',label],[],['Pokazatelj','Iznos'],['Promet',revenue],['Dobit',profit],['Troškovi',costs],['Marža (%)',margin],['Plaće',salaries],['Novčani tok',cashFlow],['Akontacije',advances],['Dugovanja',debtTotal],['Porezi',taxes],[],['Datum','Dobavljač','Kategorija','Status','Iznos'],...periodExpenses.map(e=>[e.date,e.dobavljac||'',e.category||'',e.paymentStatus||'placeno',e.amount])];
+    const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Financije');XLSX.writeFile(wb,`Hypnotic_financije_${period}.xlsx`);
+  };
+
+  return <div className="finance-page">
+    {toast&&<Toast msg={toast.msg} type={toast.type} onDone={()=>setToast(null)}/>}
+    <section className="finance-hero">
+      <div className="finance-kicker">HYPNOTIC · AI FINANCE</div>
+      <div className="finance-title">Financije, bez ručnog prepisivanja.</div>
+      <div className="finance-copy">Pošalji fotografiju ili PDF čim nešto platiš. Agent čita račun, razvrstava trošak i odmah osvježava cijelu financijsku sliku salona.</div>
+      <div className="finance-live"><i></i> Agent prati podatke uživo</div>
+    </section>
+
+    <div className="finance-toolbar">
+      <span style={{fontSize:12,fontWeight:800,color:'#55656E'}}>PREGLED ZA</span>
+      <input className="finance-select" type="month" value={period} onChange={e=>setPeriod(e.target.value)}/>
+      {salonId==='all'&&<select className="finance-select" value={filterSalon} onChange={e=>setFilterSalon(e.target.value)}><option value="">Oba salona</option>{data.salons.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select>}
+      <span className="spacer"></span>
+      <button className="btn btn-sm btn-outline" onClick={exportFinance}>📥 Izvezi izvještaj</button>
+    </div>
+
+    <div className="finance-metrics">{metrics.map(m=><div className="finance-metric" key={m.label}><div className="finance-metric-top"><span className="finance-metric-label">{m.label}</span><span className="finance-metric-icon" style={{background:m.bg,color:m.color}}>{m.icon}</span></div><div className="finance-metric-value" style={{color:m.color}}>{m.value}</div><div className="finance-metric-note">{m.note}</div></div>)}</div>
+
+    <div className="finance-agent-grid">
+      <section className="finance-panel">
+        <div className="finance-panel-title"><span>✦</span> Pošalji račun agentu</div>
+        <div className="finance-panel-sub">Fotografiraj papirnati račun ili dodaj PDF. Podaci se automatski upisuju u Troškove.</div>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" style={{display:'none'}} onChange={e=>processFile(e.target.files&&e.target.files[0])}/>
+        <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={e=>processFile(e.target.files&&e.target.files[0])}/>
+
+        {uploadState==='idle'&&<>
+          <div className={`receipt-drop${dragging?' dragging':''}`} role="button" tabIndex="0" aria-label="Dodaj račun" onClick={()=>fileRef.current&&fileRef.current.click()} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();fileRef.current&&fileRef.current.click();}}} onDragOver={e=>{e.preventDefault();setDragging(true);}} onDragLeave={()=>setDragging(false)} onDrop={e=>{e.preventDefault();setDragging(false);processFile(e.dataTransfer.files&&e.dataTransfer.files[0]);}}>
+            <div className="receipt-drop-icon">▧</div><strong>Povuci račun ovdje</strong><span>JPG, PNG ili PDF · do 15 MB</span>
+            <div className="receipt-actions"><button className="btn btn-sm btn-primary" onClick={e=>{e.stopPropagation();cameraRef.current&&cameraRef.current.click();}}>📷 Slikaj račun</button><button className="btn btn-sm btn-outline" onClick={e=>{e.stopPropagation();fileRef.current&&fileRef.current.click();}}>Dodaj datoteku</button></div>
+          </div>
+          <label className="finance-checkbox"><input type="checkbox" checked={autoBook} onChange={e=>setAuto(e.target.checked)}/><span>Automatski knjiži kada je agent vrlo siguran. Nejasni računi uvijek čekaju moju provjeru.</span></label>
+        </>}
+
+        {uploadState==='processing'&&<div className="receipt-progress"><div className="receipt-progress-row"><span>{progressLabel}</span><span>{Math.round(progress)}%</span></div><div className="receipt-progress-track"><div className="receipt-progress-fill" style={{width:`${progress}%`}}></div></div><div style={{fontSize:10,color:'#8A979E',marginTop:8}}>{file&&file.name}</div></div>}
+
+        {uploadState==='review'&&draft&&<div>
+          <div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center',marginBottom:13}}><strong style={{fontSize:13,color:'#263B46'}}>Provjeri prepoznate podatke</strong><span className="confidence" style={{background:draft.confidence>=80?'#E7F6F2':'#FFF7E8',color:draft.confidence>=80?'#0D7377':'#A56C08'}}>● {draft.confidence}% sigurnost</span></div>
+          {error&&<div style={{background:'#FFF0EF',color:'#B73732',padding:'9px 11px',borderRadius:8,fontSize:11,marginBottom:11}}>{error}</div>}
+          <div className="review-layout">
+            <div className="receipt-preview">{preview?<img src={preview} alt="Pregled računa"/>:<div className="receipt-preview-file"><div style={{fontSize:36,marginBottom:8}}>PDF</div>{file&&file.name}</div>}</div>
+            <div className="finance-form-grid">
+              {salonId==='all'&&<div className="form-group"><label>Salon</label><select value={draft.salonId} onChange={e=>setDraft(d=>({...d,salonId:e.target.value}))}>{data.salons.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>}
+              <div className="form-group"><label>Datum računa</label><input type="date" value={draft.date||''} onChange={e=>setDraft(d=>({...d,date:e.target.value}))}/></div>
+              <div className="form-group wide"><label>Dobavljač</label><input value={draft.supplier||''} onChange={e=>setDraft(d=>({...d,supplier:e.target.value}))}/></div>
+              <div className="form-group"><label>Ukupno (€)</label><input type="number" step="0.01" min="0" value={draft.amount||''} onChange={e=>setDraft(d=>({...d,amount:e.target.value}))}/></div>
+              <div className="form-group"><label>PDV (€)</label><input type="number" step="0.01" min="0" value={draft.vatAmount||''} onChange={e=>setDraft(d=>({...d,vatAmount:e.target.value}))}/></div>
+              <div className="form-group"><label>Kategorija</label><select value={draft.category||'OSTALO'} onChange={e=>setDraft(d=>({...d,category:e.target.value}))}>{EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
+              <div className="form-group"><label>Status</label><select value={draft.paymentStatus||'placeno'} onChange={e=>setDraft(d=>({...d,paymentStatus:e.target.value}))}><option value="placeno">Plaćeno</option><option value="neplaceno">Nije plaćeno</option></select></div>
+              <div className="form-group"><label>Dospijeće</label><input type="date" value={draft.dueDate||''} onChange={e=>setDraft(d=>({...d,dueDate:e.target.value}))}/></div>
+              <div className="form-group"><label>Broj računa</label><input value={draft.documentNumber||''} onChange={e=>setDraft(d=>({...d,documentNumber:e.target.value}))}/></div>
+              <div className="form-group wide"><label>Opis</label><input value={draft.description||''} onChange={e=>setDraft(d=>({...d,description:e.target.value}))}/></div>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:14,flexWrap:'wrap'}}><button className="btn btn-sm" style={{background:'#EEF1F2',color:'#54646D'}} onClick={resetUpload}>Odustani</button><button className="btn btn-primary" onClick={()=>saveExpense(draft,rawText,false)}>✓ Potvrdi i knjiži</button></div>
+        </div>}
+
+        {uploadState==='saved'&&lastBooked&&<div style={{background:'#E9F8F2',border:'1px solid #BCE4D5',borderRadius:13,padding:17}}><div style={{display:'flex',gap:11,alignItems:'flex-start'}}><div style={{width:38,height:38,borderRadius:11,background:'#CBECDD',color:'#1C7C55',display:'grid',placeItems:'center',fontSize:20}}>✓</div><div><div style={{fontSize:14,fontWeight:800,color:'#1D4938'}}>Račun je knjižen</div><div style={{fontSize:12,color:'#527266',marginTop:3}}>{lastBooked.dobavljac} · €{fmt(lastBooked.amount)} · {fmtDate(lastBooked.date)}</div></div></div><button className="btn btn-sm btn-outline" style={{marginTop:13}} onClick={resetUpload}>+ Pošalji sljedeći račun</button></div>}
+        {uploadState==='error'&&<div style={{background:'#FFF0EF',border:'1px solid #F2C5C2',borderRadius:13,padding:17}}><div style={{fontWeight:800,color:'#B73732',fontSize:13,marginBottom:5}}>Račun nije knjižen</div><div style={{fontSize:12,color:'#7D5552',lineHeight:1.45}}>{error}</div><button className="btn btn-sm btn-outline" style={{marginTop:12}} onClick={resetUpload}>Pokušaj ponovo</button></div>}
+      </section>
+
+      <section className="finance-panel">
+        <div className="finance-panel-title">Sažetak agenta</div><div className="finance-panel-sub">Što trenutačno traži tvoju pažnju.</div>
+        {insights.map((x,i)=><div className="agent-insight" key={i}><div className="agent-insight-icon" style={{background:x.tone}}>{x.icon}</div><div><strong>{x.title}</strong><p>{x.text}</p></div></div>)}
+        <div style={{marginTop:18,paddingTop:14,borderTop:'1px solid #EEF1F2'}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}><span style={{fontSize:11,fontWeight:800,color:'#63737C'}}>NOVČANI TOK</span><span style={{fontSize:13,fontWeight:850,color:cashFlow>=0?'#27885A':'#D64A43'}}>{cashFlow>=0?'+':''}€{fmt(cashFlow)}</span></div><div style={{height:7,borderRadius:99,background:'#EEF1F2',overflow:'hidden'}}><div style={{height:'100%',width:`${Math.min(100,revenue?paidOut/revenue*100:0)}%`,background:cashFlow>=0?'#4BB88A':'#E46A63',borderRadius:99}}></div></div><div style={{fontSize:10,color:'#89959B',marginTop:6}}>Priljevi €{fmt(revenue)} · plaćeni odljevi €{fmt(paidOut)}</div></div>
+      </section>
+    </div>
+
+    <div className="finance-agent-grid">
+      <section className="finance-panel"><div className="finance-panel-title">Promet i troškovi · 6 mjeseci</div><div className="finance-panel-sub">Zeleno je promet, crveno su ukupni troškovi.</div><div className="finance-bars">{monthSeries.map(m=><div className="finance-bar-col" key={m.key}><div className="finance-bar-stack"><div className="finance-bar" title={`Promet €${fmt(m.rev)}`} style={{height:`${Math.max(m.rev?4:0,m.rev/seriesMax*100)}%`,background:'#36A982'}}></div><div className="finance-bar" title={`Troškovi €${fmt(m.out)}`} style={{height:`${Math.max(m.out?4:0,m.out/seriesMax*100)}%`,background:'#E56B64'}}></div></div><div className="finance-bar-label">{monthName(m.key)}</div></div>)}</div></section>
+      <section className="finance-panel"><div className="finance-panel-title">Otvorena dugovanja</div><div className="finance-panel-sub">Neplaćeni računi i obveze iz svih mjeseci.</div>{!debts.length?<div className="finance-empty">Nema otvorenih dugovanja. ✓</div>:<div style={{maxHeight:190,overflowY:'auto'}}>{debts.sort((a,b)=>(a.dueDate||'9999').localeCompare(b.dueDate||'9999')).slice(0,8).map(e=><div key={e.id} style={{display:'flex',alignItems:'center',gap:9,padding:'9px 0',borderBottom:'1px solid #EEF1F2'}}><div style={{minWidth:0,flex:1}}><div style={{fontSize:12,fontWeight:750,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{e.dobavljac||e.subcategory||'Obveza'}</div><div style={{fontSize:10,color:e.dueDate&&e.dueDate<today()?'#D64A43':'#87949B'}}>{e.dueDate?`Dospijeće ${fmtDate(e.dueDate)}`:'Bez datuma dospijeća'}</div></div><strong style={{fontSize:12,color:'#D64A43'}}>€{fmt(expenseDebtAmount(e))}</strong><button className="btn btn-sm" style={{padding:'4px 7px',background:'#E7F6F2',color:'#0D7377'}} onClick={()=>markPaid(e.id)}>Plaćeno</button></div>)}</div>}</section>
+    </div>
+
+    <section className="finance-panel"><div className="finance-panel-title">Nedavno knjiženi računi</div><div className="finance-panel-sub">Računi koje je obradio AI financijski agent.</div>{!recentAI.length?<div className="finance-empty">Još nema računa obrađenih putem agenta. Pošalji prvi iznad.</div>:<div className="table-wrapper"><table><thead><tr><th>Datum</th><th>Dobavljač</th><th>Kategorija</th><th>Status</th><th style={{textAlign:'right'}}>Iznos</th></tr></thead><tbody>{recentAI.map(e=><tr key={e.id}><td>{fmtDate(e.date)}</td><td><strong>{e.dobavljac||'—'}</strong><div style={{fontSize:10,color:'#929DA2'}}>{e.documentNumber||e.receiptFileName||''}</div></td><td>{e.category}</td><td><span className="finance-table-status" style={{background:(e.paymentStatus||'placeno')==='placeno'?'#E7F6F2':'#FFF0EF',color:(e.paymentStatus||'placeno')==='placeno'?'#0D7377':'#D64A43'}}>{(e.paymentStatus||'placeno')==='placeno'?'✓ Plaćeno':'! Dugovanje'}</span></td><td style={{textAlign:'right',fontWeight:800}}>€{fmt(e.amount)}</td></tr>)}</tbody></table></div>}</section>
+  </div>;
+}
+
 function Troskovi({ data, salonId, onRefresh }) {
   const [fSalon, setFSalon] = useState(salonId==='all'?'':salonId);
   const [fMonth, setFMonth] = useState(today().slice(0,7));
@@ -4875,6 +5269,7 @@ function Troskovi({ data, salonId, onRefresh }) {
   const [form, setForm] = useState({
     salonId: salonId==='all'?(data.salons[0]?.id||'savska'):salonId,
     date: today(), category: 'FIKSNI TROŠKOVI', subcategory: '', amount: '', note: '', type: 'fiksni', dobavljac: '',
+    paymentStatus:'placeno', dueDate:'', paymentMethod:'', documentNumber:'', vatAmount:'',
   });
   const [toast, setToast] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -4887,9 +5282,12 @@ function Troskovi({ data, salonId, onRefresh }) {
 
   const handleAdd = () => {
     if (!form.amount || !form.category) { setToast({msg:'Unesite iznos i kategoriju!',type:'error'}); return; }
-    const e = { id:uid(), ...form, amount:parseFloat(form.amount)||0, createdAt:new Date().toISOString() };
+    const amount=parseFloat(form.amount)||0;
+    const e = { id:uid(), ...form, amount, vatAmount:parseFloat(form.vatAmount)||0,
+      paidAmount:form.paymentStatus==='placeno'?amount:0,
+      paidDate:form.paymentStatus==='placeno'?today():'', createdAt:new Date().toISOString() };
     save({...data, expenses:[...expenses, e]});
-    setForm(f=>({...f, amount:'', note:'', subcategory:''}));
+    setForm(f=>({...f, amount:'', note:'', subcategory:'', documentNumber:'', vatAmount:'', dueDate:''}));
   };
 
   const copyFixedCosts = () => {
@@ -4920,7 +5318,12 @@ function Troskovi({ data, salonId, onRefresh }) {
   const cancelEdit = () => { setEditId(null); setEditRow(null); };
   const saveEditExp = () => {
     if (!editRow.amount || !editRow.category) { setToast({msg:'Unesite iznos i kategoriju!',type:'error'}); return; }
-    const updated = expenses.map(e => e.id===editId ? {...editRow, amount:parseFloat(editRow.amount)||0} : e);
+    const updated = expenses.map(e => {
+      if(e.id!==editId) return e;
+      const amount=parseFloat(editRow.amount)||0;
+      const status=editRow.paymentStatus||'placeno';
+      return {...editRow,amount,paidAmount:status==='placeno'?amount:Number(editRow.paidAmount||0),paidDate:status==='placeno'?(editRow.paidDate||today()):''};
+    });
     save({...data, expenses:updated});
     setEditId(null); setEditRow(null);
   };
@@ -5070,6 +5473,25 @@ function Troskovi({ data, salonId, onRefresh }) {
                 placeholder="0.00" min="0" step="0.01" />
             </div>
             <div className="form-group">
+              <label>💳 Status plaćanja</label>
+              <select value={form.paymentStatus} onChange={e=>set('paymentStatus',e.target.value)}>
+                <option value="placeno">Plaćeno</option>
+                <option value="neplaceno">Nije plaćeno / dugovanje</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>⏳ Datum dospijeća</label>
+              <input type="date" value={form.dueDate} onChange={e=>set('dueDate',e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>🧾 Broj računa</label>
+              <input value={form.documentNumber} onChange={e=>set('documentNumber',e.target.value)} placeholder="opcionalno" />
+            </div>
+            <div className="form-group">
+              <label>🏛️ PDV (€)</label>
+              <input type="number" value={form.vatAmount} onChange={e=>set('vatAmount',e.target.value)} placeholder="0.00" min="0" step="0.01" />
+            </div>
+            <div className="form-group">
               <label>🏭 Dobavljač / Firma</label>
               <input value={form.dobavljac} onChange={e=>set('dobavljac',e.target.value)}
                 placeholder="npr. L'Oréal, OTP banka, Ivan Perić..."
@@ -5134,7 +5556,7 @@ function Troskovi({ data, salonId, onRefresh }) {
               )}
               <div style={{overflowX:'auto'}}>
                 <table>
-                  <thead><tr><th>Datum</th><th>Vrsta</th><th>Kategorija</th><th>Opis</th><th>Dobavljač</th>{salonId==='all'&&<th>Salon</th>}<th style={{textAlign:'right'}}>Iznos (€)</th><th></th></tr></thead>
+                  <thead><tr><th>Datum</th><th>Vrsta</th><th>Kategorija</th><th>Opis</th><th>Dobavljač</th>{salonId==='all'&&<th>Salon</th>}<th>Status</th><th style={{textAlign:'right'}}>Iznos (€)</th><th></th></tr></thead>
                   <tbody>
                     {filteredExp.sort((a,b)=>b.date.localeCompare(a.date)).map((e,i)=>{
                       const sal = data.salons.find(s=>s.id===e.salonId);
@@ -5147,6 +5569,7 @@ function Troskovi({ data, salonId, onRefresh }) {
                           <td style={{fontSize:13}}>{e.subcategory}{e.note?` · ${e.note}`:''}</td>
                           <td style={{fontSize:12,color:'#555'}}>{e.dobavljac||'—'}</td>
                           {salonId==='all'&&<td style={{fontSize:12}}>{sal?.name||e.salonId}</td>}
+                          <td><span className="finance-table-status" style={{background:(e.paymentStatus||'placeno')==='placeno'?'#E7F6F2':'#FFF0EF',color:(e.paymentStatus||'placeno')==='placeno'?'#0D7377':'#D64A43'}}>{(e.paymentStatus||'placeno')==='placeno'?'✓ Plaćeno':'! Dugovanje'}</span></td>
                           <td className="td-amount" style={{fontWeight:700,color:'var(--red)'}}>€{fmt(e.amount)}</td>
                           <td style={{display:'flex',gap:4,flexWrap:'nowrap'}}>
                             <button className="btn btn-sm" style={{background:'#1565C0',color:'#fff',border:'none'}} onClick={()=>startEdit(e)} title="Uredi">✏️</button>
@@ -5155,11 +5578,11 @@ function Troskovi({ data, salonId, onRefresh }) {
                         </tr>
                         {editId===e.id && editRow && (
                           <tr style={{background:'#fffde7'}}>
-                            <td colSpan={salonId==='all'?8:7} style={{padding:'10px 8px'}}>
+                            <td colSpan={salonId==='all'?9:8} style={{padding:'10px 8px'}}>
                               <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center'}}>
                                 <input type="date" value={editRow.date||''} onChange={ev=>setEditRow(r=>({...r,date:ev.target.value}))} style={{fontSize:12}} />
                                 <select value={editRow.category||''} onChange={ev=>setEditRow(r=>({...r,category:ev.target.value}))} style={{fontSize:12}}>
-                                  {['FIKSNI TROŠKOVI','VARIJABILNI TROŠKOVI','ISPLATE','OSTALO'].map(c=><option key={c} value={c}>{c}</option>)}
+                                  {EXPENSE_CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
                                 </select>
                                 <input value={editRow.subcategory||''} onChange={ev=>setEditRow(r=>({...r,subcategory:ev.target.value}))} placeholder="Opis" style={{fontSize:12,minWidth:120}} list="edit-sub-opts" />
                                 <datalist id="edit-sub-opts">{allSubcats.map((s,i)=><option key={i} value={s}/>)}</datalist>
@@ -5169,6 +5592,8 @@ function Troskovi({ data, salonId, onRefresh }) {
                                 {salonId==='all' && <select value={editRow.salonId||''} onChange={ev=>setEditRow(r=>({...r,salonId:ev.target.value}))} style={{fontSize:12}}>
                                   {data.salons.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
                                 </select>}
+                                <select value={editRow.paymentStatus||'placeno'} onChange={ev=>setEditRow(r=>({...r,paymentStatus:ev.target.value,paidAmount:ev.target.value==='placeno'?Number(r.amount||0):0,paidDate:ev.target.value==='placeno'?today():''}))} style={{fontSize:12}}><option value="placeno">Plaćeno</option><option value="neplaceno">Dugovanje</option></select>
+                                <input type="date" value={editRow.dueDate||''} onChange={ev=>setEditRow(r=>({...r,dueDate:ev.target.value}))} title="Datum dospijeća" style={{fontSize:12}} />
                                 <input type="number" value={editRow.amount||''} onChange={ev=>setEditRow(r=>({...r,amount:ev.target.value}))} placeholder="Iznos" style={{fontSize:12,width:80}} />
                                 <button className="btn btn-primary btn-sm" onClick={saveEditExp}>💾 Spremi</button>
                                 <button className="btn btn-sm" style={{background:'#eee'}} onClick={cancelEdit}>✕</button>
@@ -5180,7 +5605,7 @@ function Troskovi({ data, salonId, onRefresh }) {
                       );
                     })}
                     <tr style={{background:'var(--dark)',color:'#fff',fontWeight:700}}>
-                      <td colSpan={salonId==='all'?6:5}>UKUPNO</td>
+                      <td colSpan={salonId==='all'?7:6}>UKUPNO</td>
                       <td style={{textAlign:'right',color:'var(--gold)'}}>€{fmt(totalExpenses)}</td>
                       <td></td>
                     </tr>
@@ -5943,7 +6368,10 @@ function App({ initialData }) {
     } catch(e){}
     return null;
   });
-  const [tab, setTab] = useState('unos');
+  const [tab, setTab] = useState(()=>{
+    try { const s=JSON.parse(sessionStorage.getItem('hypnotic_session')||'null'); return s&&s.salonId==='all'?'financije':'unos'; }
+    catch(e){ return 'unos'; }
+  });
   const refresh = useCallback(d=>setData(d),[]);
   const logout  = () => { sessionStorage.removeItem('hypnotic_session'); setSalonId(null); };
 
@@ -5980,14 +6408,14 @@ function App({ initialData }) {
     return () => ref.off('value', handler);
   }, []);
 
-  if (!salonId) return <LoginScreen data={data} onLogin={id=>{setSalonId(id);setTab(id==='all'?'statistike':'unos');}}/>;
+  if (!salonId) return <LoginScreen data={data} onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
 
   const salon = data.salons.find(s=>s.id===salonId);
   const salonColor = salonId==='all'?'var(--dark)':(salon?.color||'var(--teal)');
   const salonLabel = salonId==='all'?'Administrator — Svi saloni':(salon?.name||'Salon');
 
   const tabs = salonId==='all'
-    ? [['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
+    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
     : [['unos','➕ Novi unos'],['pregled','📋 Pregled'],['provjera','💵 Provjera'],['klijentice','👥 Klijentice'],['postavke','⚙️ Postavke']];
 
   return (
@@ -6028,6 +6456,7 @@ function App({ initialData }) {
         ))}
       </div>
       <div className="main">
+        {tab==='financije'   && <FinancijskiAgent data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='unos'        && <NoviUnos    data={data} salonId={salonId} onRefresh={refresh} activeStaff={activeStaff}/>}
         {tab==='pregled'     && <Pregled     data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='statistike'  && <Statistike  data={data} salonId={salonId}/>}
