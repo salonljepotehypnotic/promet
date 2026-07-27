@@ -4945,6 +4945,12 @@ const expensePaidAmount = e => {
   return Number(e.amount||0);
 };
 const expenseDebtAmount = e => Math.max(0, Number(e.amount||0)-expensePaidAmount(e));
+const expenseAccountingPeriod = e => e.accountingPeriod || (e.date||'').slice(0,7);
+const expenseCashDate = e => {
+  const status=e.paymentStatus||'placeno';
+  if(status==='neplaceno') return '';
+  return e.paidDate||e.date||'';
+};
 
 function parseReceiptAmount(value) {
   let s = String(value||'').replace(/\s/g,'').replace(/[^0-9,.-]/g,'');
@@ -5093,10 +5099,11 @@ function FinancijskiAgent({data,salonId,onRefresh}) {
   const setAuto=value=>{setAutoBook(value);try{localStorage.setItem('hypnotic_fin_auto',String(value));}catch(e){}};
   const expenses=data.expenses||[];
   const periodEntries=useMemo(()=>data.entries.filter(e=>(!filterSalon||e.salon===filterSalon)&&(e.date||'').startsWith(period)&&!FINANCE_REVENUE_EXCLUDE.has(normPayment(e.payment))),[data.entries,filterSalon,period]);
-  const periodExpenses=useMemo(()=>expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&(e.date||'').startsWith(period)),[expenses,filterSalon,period]);
+  const periodExpenses=useMemo(()=>expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&expenseAccountingPeriod(e)===period),[expenses,filterSalon,period]);
+  const periodCashExpenses=useMemo(()=>expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&expenseCashDate(e).startsWith(period)),[expenses,filterSalon,period]);
   const revenue=periodEntries.reduce((s,e)=>s+Number(e.total||0),0);
   const costs=periodExpenses.reduce((s,e)=>s+Number(e.amount||0),0);
-  const paidOut=periodExpenses.reduce((s,e)=>s+expensePaidAmount(e),0);
+  const paidOut=periodCashExpenses.reduce((s,e)=>s+expensePaidAmount(e),0);
   const profit=revenue-costs;
   const margin=revenue?profit/revenue*100:0;
   const salaries=periodExpenses.filter(isSalaryExpense).reduce((s,e)=>s+Number(e.amount||0),0);
@@ -5116,7 +5123,7 @@ function FinancijskiAgent({data,salonId,onRefresh}) {
       const d=new Date(y,m-6+idx,1);
       const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       const rev=data.entries.filter(e=>(!filterSalon||e.salon===filterSalon)&&(e.date||'').startsWith(key)&&!FINANCE_REVENUE_EXCLUDE.has(normPayment(e.payment))).reduce((s,e)=>s+Number(e.total||0),0);
-      const out=expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&(e.date||'').startsWith(key)).reduce((s,e)=>s+Number(e.amount||0),0);
+      const out=expenses.filter(e=>(!filterSalon||e.salonId===filterSalon)&&expenseAccountingPeriod(e)===key).reduce((s,e)=>s+Number(e.amount||0),0);
       return {key,rev,out};
     });
   },[data.entries,expenses,filterSalon,period]);
@@ -5150,7 +5157,7 @@ function FinancijskiAgent({data,salonId,onRefresh}) {
     if(d.receiptFingerprint && expenses.some(e=>e.receiptFingerprint===d.receiptFingerprint)){setError('Ovaj račun je već knjižen. Duplikat nije dodan.');setUploadState('error');return;}
     const amount=Number(d.amount)||0;
     const status=d.paymentStatus||'placeno';
-    const exp={id:uid(),date:d.date,salonId:d.salonId||defaultSalon,category:d.category||'OSTALO',subcategory:d.description||'Račun',amount,note:d.documentNumber?`Račun ${d.documentNumber}`:'Račun učitan putem AI agenta',type:d.category==='FIKSNI TROŠKOVI'?'fiksni':'varijabilni',dobavljac:d.supplier,paymentStatus:status,paidAmount:status==='placeno'?amount:0,paidDate:status==='placeno'?today():'',dueDate:d.dueDate||'',paymentMethod:d.paymentMethod||'',documentNumber:d.documentNumber||'',supplierOib:d.oib||'',vatAmount:Number(d.vatAmount)||0,source:'ai-racun',receiptFileName:d.fileName||'',receiptMimeType:d.fileType||'',receiptFingerprint:d.receiptFingerprint||'',ocrConfidence:Number(d.confidence)||0,ocrText:String(sourceText||'').slice(0,2500),createdAt:new Date().toISOString()};
+    const exp={id:uid(),date:d.date,accountingPeriod:d.accountingPeriod||d.date.slice(0,7),salonId:d.salonId||defaultSalon,category:d.category||'OSTALO',subcategory:d.description||'Račun',amount,note:d.documentNumber?`Račun ${d.documentNumber}`:'Račun učitan putem AI agenta',type:d.category==='FIKSNI TROŠKOVI'?'fiksni':'varijabilni',dobavljac:d.supplier,paymentStatus:status,paidAmount:status==='placeno'?amount:0,paidDate:status==='placeno'?(d.paidDate||d.date):'',dueDate:d.dueDate||'',paymentMethod:d.paymentMethod||'',documentNumber:d.documentNumber||'',supplierOib:d.oib||'',vatAmount:Number(d.vatAmount)||0,source:'ai-racun',receiptFileName:d.fileName||'',receiptMimeType:d.fileType||'',receiptFingerprint:d.receiptFingerprint||'',ocrConfidence:Number(d.confidence)||0,ocrText:String(sourceText||'').slice(0,2500),createdAt:new Date().toISOString()};
     const nd={...data,expenses:[...expenses,exp]};
     saveData(nd);onRefresh(nd);setLastBooked(exp);setDraft(null);setUploadState('saved');setProgress(100);setToast({msg:automatic?'Račun je automatski knjižen!':'Račun je knjižen!'});
   };
@@ -5166,7 +5173,8 @@ function FinancijskiAgent({data,salonId,onRefresh}) {
       if(expenses.some(e=>e.receiptFingerprint===fingerprint)){setError('Ovaj račun je već knjižen. Duplikat nije dodan.');setUploadState('error');return;}
       const text=await extractReceiptText(picked,(p,label)=>{setProgress(Math.min(98,p));setProgressLabel(label);});
       if(!text.trim())throw new Error('Na računu nisam pronašao čitljiv tekst. Pokušaj s jasnijom fotografijom.');
-      const parsed={...parseReceiptText(text,picked.name),salonId:defaultSalon,paymentStatus:'placeno',fileType:picked.type,receiptFingerprint:fingerprint};
+      const base=parseReceiptText(text,picked.name);
+      const parsed={...base,accountingPeriod:base.date.slice(0,7),salonId:defaultSalon,paymentStatus:'placeno',paidDate:base.date,fileType:picked.type,receiptFingerprint:fingerprint};
       setRawText(text);setDraft(parsed);setProgress(100);
       if(autoBook && parsed.confidence>=90 && parsed.supplier && parsed.amount>0) saveExpense(parsed,text,true);
       else setUploadState('review');
@@ -5283,9 +5291,9 @@ function Troskovi({ data, salonId, onRefresh }) {
   const handleAdd = () => {
     if (!form.amount || !form.category) { setToast({msg:'Unesite iznos i kategoriju!',type:'error'}); return; }
     const amount=parseFloat(form.amount)||0;
-    const e = { id:uid(), ...form, amount, vatAmount:parseFloat(form.vatAmount)||0,
+    const e = { id:uid(), ...form, accountingPeriod:form.date.slice(0,7), amount, vatAmount:parseFloat(form.vatAmount)||0,
       paidAmount:form.paymentStatus==='placeno'?amount:0,
-      paidDate:form.paymentStatus==='placeno'?today():'', createdAt:new Date().toISOString() };
+      paidDate:form.paymentStatus==='placeno'?form.date:'', createdAt:new Date().toISOString() };
     save({...data, expenses:[...expenses, e]});
     setForm(f=>({...f, amount:'', note:'', subcategory:'', documentNumber:'', vatAmount:'', dueDate:''}));
   };
@@ -5303,6 +5311,8 @@ function Troskovi({ data, salonId, onRefresh }) {
     const newExp = toCopy.map(e => ({
       ...e, id:uid(),
       date: fMonth+'-'+(e.date||'').slice(8),
+      accountingPeriod: fMonth,
+      paidDate: (e.paymentStatus||'placeno')==='placeno'?fMonth+'-'+((e.paidDate||e.date||'').slice(8)||'01'):'',
       createdAt: new Date().toISOString(),
     }));
     save({...data, expenses:[...expenses, ...newExp]});
@@ -5322,7 +5332,7 @@ function Troskovi({ data, salonId, onRefresh }) {
       if(e.id!==editId) return e;
       const amount=parseFloat(editRow.amount)||0;
       const status=editRow.paymentStatus||'placeno';
-      return {...editRow,amount,paidAmount:status==='placeno'?amount:Number(editRow.paidAmount||0),paidDate:status==='placeno'?(editRow.paidDate||today()):''};
+      return {...editRow,accountingPeriod:editRow.accountingPeriod||(editRow.date||'').slice(0,7),amount,paidAmount:status==='placeno'?amount:Number(editRow.paidAmount||0),paidDate:status==='placeno'?(editRow.paidDate||editRow.date||today()):''};
     });
     save({...data, expenses:updated});
     setEditId(null); setEditRow(null);
@@ -5332,7 +5342,7 @@ function Troskovi({ data, salonId, onRefresh }) {
   const filteredExp = useMemo(() => {
     return expenses.filter(e => {
       if (fSalon && e.salonId !== fSalon) return false;
-      if (fMonth && !(e.date||'').startsWith(fMonth)) return false;
+      if (fMonth && expenseAccountingPeriod(e)!==fMonth) return false;
       return true;
     });
   }, [expenses, fSalon, fMonth]);
@@ -5372,14 +5382,14 @@ function Troskovi({ data, salonId, onRefresh }) {
   const months = useMemo(() => {
     const allMonths = new Set([
       ...data.entries.map(e=>e.date.slice(0,7)),
-      ...expenses.map(e=>(e.date||'').slice(0,7)).filter(Boolean),
+      ...expenses.map(expenseAccountingPeriod).filter(Boolean),
     ]);
     return [...allMonths].sort().slice(-12);
   }, [data.entries, expenses]);
 
   const monthlyData = useMemo(() => {
     return months.map(m => {
-      const mExpenses = expenses.filter(e=>(fSalon?e.salonId===fSalon:true)&&(e.date||'').startsWith(m)).reduce((s,e)=>s+e.amount,0);
+      const mExpenses = expenses.filter(e=>(fSalon?e.salonId===fSalon:true)&&expenseAccountingPeriod(e)===m).reduce((s,e)=>s+e.amount,0);
       const mRevenue  = data.entries.filter(e=>(fSalon?e.salon===fSalon:true)&&(e.date||'').startsWith(m)).reduce((s,e)=>s+e.total,0);
       return { month:m, revenue:mRevenue, expenses:mExpenses, profit:mRevenue-mExpenses };
     });
