@@ -2919,12 +2919,12 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
       {tab==='staff' && (
         <div className="card">
           <div className="card-title">👩 Djelatnice</div>
-          <p style={{fontSize:12,color:'#999',marginBottom:12}}>Klikni na naziv salona uz djelatnicu da promijeniš njezinu dodjelu.</p>
+          <p style={{fontSize:12,color:'#999',marginBottom:12}}>Klikni salon da promijeniš dodjelu. Klikni <strong>👁 vidljivo / 🚫 skriveno</strong> da odabereš tko se pojavljuje na ekranu „Tko unosi?" (bez brisanja).</p>
           {data.staff.map(s=>{
             const salonColor = s.salonId==='savska'?'#0D7377':s.salonId==='dobojska'?'#D4AF37':'#888';
             const salonLabel = s.salonId==='savska'?'Savska':s.salonId==='dobojska'?'Dobojska':'Oba';
             return (
-              <div key={s.id} className="salon-list-item" style={{flexWrap:'wrap',gap:6}}>
+              <div key={s.id} className="salon-list-item" style={{flexWrap:'wrap',gap:6,opacity:s.hidden?0.5:1}}>
                 <span>👤</span>
                 <strong style={{flex:1,minWidth:120}}>{s.name}</strong>
                 <span style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:20,
@@ -2944,6 +2944,12 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
                     </button>
                   ))}
                 </div>
+                <button onClick={()=>save({...data,staff:data.staff.map(x=>x.id===s.id?{...x,hidden:!x.hidden}:x)})}
+                  title={s.hidden?'Skriveno s ekrana "Tko unosi?" — klikni da prikažeš':'Prikazano na "Tko unosi?" — klikni da sakriješ'}
+                  style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',background:'transparent',
+                    border:`1.5px solid ${s.hidden?'#E74C3C':'#27AE60'}`,color:s.hidden?'#E74C3C':'#27AE60'}}>
+                  {s.hidden?'🚫 skriveno':'👁 vidljivo'}
+                </button>
                 <button className="del-btn" onClick={()=>{
                   if(!confirm(`Obriši djelatnicu "${s.name}"?`)) return;
                   save({...data,staff:data.staff.filter(x=>x.id!==s.id)});
@@ -6466,7 +6472,7 @@ function App({ initialData }) {
           <div style={{color:'#fff',fontSize:22,fontWeight:800,marginBottom:6}}>Tko unosi?</div>
           <div style={{color:'#bbb',fontSize:14,marginBottom:24,textAlign:'center',lineHeight:1.5}}>Odaberi svoje ime za nastavak.<br/>Nakon 2 min neaktivnosti aplikacija se vraća ovamo.</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,width:'100%',maxWidth:460}}>
-            {(data.staff||[]).filter(s=>!s.salonId||s.salonId===salonId).map(s=>(
+            {(data.staff||[]).filter(s=>(!s.salonId||s.salonId===salonId) && !s.hidden).map(s=>(
               <button key={s.id||s.name} onClick={()=>setActive(s.name)}
                 style={{padding:'16px 12px',borderRadius:12,border:'none',background:salonColor,color:'#fff',fontSize:16,fontWeight:700,cursor:'pointer'}}>
                 {s.name}
