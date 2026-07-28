@@ -17,7 +17,10 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Jost','Segoe UI',Arial,sans-serif;background:var(--ink);color:var(--paper);min-height:100vh}
-:root{--ink:#17120C;--dark:#241C12;--gold:#C9A66B;--teal:#9A6A3C;--teal-l:#EFE6D6;--green:#3F8F5F;--orange:#C98A3C;--red:#B4544A;--grey:#F4EDE1;--border:#E4D8C2;--white:#FBF6EC;--paper:#EDE3D0}
+:root{--ink:#17120C;--dark:#241C12;--gold:#C9A66B;--teal:#9A6A3C;--teal-l:#EFE6D6;--green:#3F8F5F;--orange:#C98A3C;--red:#B4544A;--grey:#F4EDE1;--border:#E4D8C2;--white:#FBF6EC;--paper:#EDE3D0;--ink-text:#2A2018}
+/* Tekst UNUTAR svijetlih (krem) kartica/panela mora biti taman i čitljiv; svijetli ostaje na tamnoj podlozi */
+.card,.stat-card,.login-card,table,.ac-dropdown{color:var(--ink-text)}
+.card .stat-sub,.card small,.stat-sub{color:#7A6A54}
 .app-header{background:var(--dark);color:#fff;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
 .app-logo{font-family:'Playfair Display',serif;font-weight:700;font-size:22px;letter-spacing:1px;color:var(--gold)}
 .app-logo span{color:var(--paper);font-weight:400;font-style:italic}
