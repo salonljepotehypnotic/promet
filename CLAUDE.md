@@ -113,8 +113,10 @@ Applied in `saveData()` (encode) and `mergeWithFirebase()` (decode).
 
 ## Security — CRITICAL
 
-⚠️ **NEVER display passwords in the login UI** — not as hints, defaults, or descriptions.  
-Passwords are: Savska=1234, Dobojska=5678, Admin=9999 — treat as confidential, never put in UI.
+⚠️ **NEVER display passwords in the login UI** — not as hints, defaults, or descriptions.
+⚠️ **NEVER write real PIN/password values in this repo** (docs, code, or seed). They were removed on 2026-07-28. Rotate PINs via Postavke → Lozinke; treat as confidential.
+
+⚠️ **KNOWN CRITICAL EXPOSURE (2026-07-28):** the Firebase RTDB has NO auth rules — the whole `/hypnotic` tree (clients, entries, expenses, pointsLedger, staff, config) is world-readable via the public REST URL, bypassing the PIN login entirely. The PIN is cosmetic. Real fix = Firebase Auth + security rules (pending decision). Client personal data + revenue are currently public — GDPR-relevant.
 
 ## Login / Auth
 
