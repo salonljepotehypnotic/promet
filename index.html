@@ -11,24 +11,27 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Jost:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',Arial,sans-serif;background:#F0F2F5;color:#1A1A2E;min-height:100vh}
-:root{--dark:#1A1A2E;--gold:#D4AF37;--teal:#0D7377;--teal-l:#E0F7F8;--green:#27AE60;--orange:#E67E22;--red:#E74C3C;--grey:#F5F7FA;--border:#E0E0E0;--white:#FFFFFF}
+body{font-family:'Jost','Segoe UI',Arial,sans-serif;background:var(--ink);color:var(--paper);min-height:100vh}
+:root{--ink:#17120C;--dark:#241C12;--gold:#C9A66B;--teal:#9A6A3C;--teal-l:#EFE6D6;--green:#3F8F5F;--orange:#C98A3C;--red:#B4544A;--grey:#F4EDE1;--border:#E4D8C2;--white:#FBF6EC;--paper:#EDE3D0}
 .app-header{background:var(--dark);color:#fff;padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
-.app-logo{font-weight:700;font-size:18px;letter-spacing:1px;color:var(--gold)}
-.app-logo span{color:#fff;font-weight:300}
+.app-logo{font-family:'Playfair Display',serif;font-weight:700;font-size:22px;letter-spacing:1px;color:var(--gold)}
+.app-logo span{color:var(--paper);font-weight:400;font-style:italic}
 .salon-badge{display:flex;align-items:center;gap:8px}
 .salon-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
 .salon-name-display{font-weight:600;font-size:14px;cursor:pointer;padding:6px 12px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);transition:background 0.2s}
 .salon-name-display:hover{background:rgba(255,255,255,0.1)}
-.nav-bar{background:#fff;border-bottom:1px solid var(--border);display:flex;gap:0;padding:0 24px;overflow-x:auto}
-.nav-tab{padding:14px 20px;font-size:14px;font-weight:500;color:#666;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all 0.2s}
-.nav-tab:hover{color:var(--teal);background:#f5f5f5}
-.nav-tab.active{color:var(--teal);border-bottom-color:var(--teal);font-weight:600}
+.nav-bar{background:var(--dark);border-bottom:1px solid rgba(201,166,107,0.25);display:flex;gap:0;padding:0 24px;overflow-x:auto}
+.nav-tab{padding:14px 20px;font-size:14px;font-weight:400;color:#B9A98C;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap;transition:all 0.2s;letter-spacing:.3px}
+.nav-tab:hover{color:var(--gold);background:rgba(255,255,255,0.04)}
+.nav-tab.active{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
 .main{padding:24px;max-width:1400px;margin:0 auto}
-.card{background:#fff;border-radius:12px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06);margin-bottom:20px}
-.card-title{font-size:17px;font-weight:700;color:var(--dark);margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.card{background:var(--white);border:1px solid var(--border);border-radius:14px;padding:24px;box-shadow:0 4px 24px rgba(0,0,0,0.28);margin-bottom:20px}
+.card-title{font-family:'Playfair Display',serif;font-size:21px;font-weight:600;color:var(--dark);margin-bottom:18px;display:flex;align-items:center;gap:8px;letter-spacing:.2px}
 .form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
 .form-group{display:flex;flex-direction:column;gap:6px}
 .form-group.wide{grid-column:1/-1}
@@ -76,11 +79,11 @@ tr:hover td{background:#F8FCFC}
 @keyframes slideIn{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}
 
 /* LOGIN SCREEN */
-.login-screen{min-height:100vh;background:linear-gradient(135deg,#1A1A2E 0%,#0D2137 100%);display:flex;align-items:center;justify-content:center;padding:20px}
-.login-card{background:#fff;border-radius:20px;padding:40px;text-align:center;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.4)}
+.login-screen{min-height:100vh;background:linear-gradient(150deg,#241C12 0%,#17120C 60%,#0E0B07 100%);display:flex;align-items:center;justify-content:center;padding:20px}
+.login-card{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:40px;text-align:center;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.55)}
 .login-logo{font-size:38px;margin-bottom:4px}
-.login-title{font-size:26px;font-weight:800;color:var(--dark);margin-bottom:4px}
-.login-sub{color:#999;font-size:14px;margin-bottom:28px}
+.login-title{font-family:'Playfair Display',serif;font-size:30px;font-weight:600;color:var(--dark);margin-bottom:4px}
+.login-sub{color:#8A7A62;font-size:14px;margin-bottom:28px}
 .salon-btn{display:flex;align-items:center;gap:14px;width:100%;padding:15px 18px;border-radius:12px;border:2px solid var(--border);background:#fff;cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;transition:all 0.2s;font-family:inherit;text-align:left}
 .salon-btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,0.08)}
 .salon-btn.selected{border-color:currentColor}
@@ -111,7 +114,7 @@ tr:hover td{background:#F8FCFC}
 
 /* AI FINANCIJSKI AGENT */
 .finance-page{--fin-ink:#172632;--fin-mint:#E7F6F2;--fin-blue:#EAF1FF;--fin-warm:#FFF7E8}
-.finance-hero{position:relative;overflow:hidden;background:linear-gradient(125deg,#142A35 0%,#0D7377 72%,#31A68D 100%);color:#fff;border-radius:20px;padding:26px 28px;margin-bottom:18px;box-shadow:0 12px 32px rgba(13,115,119,.18)}
+.finance-hero{position:relative;overflow:hidden;background:linear-gradient(125deg,#241C12 0%,#6E4A2A 66%,#9A6A3C 100%);color:var(--paper);border-radius:20px;padding:26px 28px;margin-bottom:18px;box-shadow:0 12px 32px rgba(0,0,0,.4);border:1px solid rgba(201,166,107,0.28)}
 .finance-hero:after{content:'';position:absolute;width:240px;height:240px;border-radius:50%;right:-70px;top:-120px;background:rgba(255,255,255,.08)}
 .finance-kicker{font-size:11px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:#92E5D0;margin-bottom:7px}
 .finance-title{font-size:27px;line-height:1.12;font-weight:850;letter-spacing:-.5px;margin-bottom:8px}
