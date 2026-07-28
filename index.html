@@ -170,6 +170,7 @@ tr:hover td{background:#F8FCFC}
 </style>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script>
 firebase.initializeApp({apiKey:"AIzaSyCSWE_s0qwvUxnMoj6OCW497sLdXwJHVcE",authDomain:"salon-ljepote-hypnotic-63b86.firebaseapp.com",databaseURL:"https://salon-ljepote-hypnotic-63b86-default-rtdb.firebaseio.com",projectId:"salon-ljepote-hypnotic-63b86",storageBucket:"salon-ljepote-hypnotic-63b86.firebasestorage.app",messagingSenderId:"5097250870",appId:"1:5097250870:web:d7a21ad59d0d8a52f13897"});
 window.__firebaseDb = firebase.database();
@@ -562,17 +563,22 @@ function LoginScreen({ data, onLogin }) {
   };
 
   const tryLogin = () => {
-    const id = isAdmin ? 'admin' : selected;
-    if (hashPin(pin) === storedHash(id)) {
+    const proceed = () => {
       sessionStorage.setItem('hypnotic_session', JSON.stringify({
         salonId: isAdmin ? 'all' : selected,
         expires: Date.now() + 8*60*60*1000
       }));
       onLogin(isAdmin ? 'all' : selected);
-    } else {
-      setError('Pogrešna lozinka! Pokušaj ponovo.');
-      setPin('');
+    };
+    // Baza je zaključana Firebase pravilima → prijava zajedničkom lozinkom.
+    // Ako je uređaj već otključan (Firebase pamti prijavu), lozinka se ne traži ponovno.
+    if (window.firebase && firebase.auth().currentUser) { proceed(); return; }
+    if (!window.firebase || !firebase.auth) { // ako auth nije učitan, ne blokiraj rad
+      proceed(); return;
     }
+    firebase.auth().signInWithEmailAndPassword('salonljepotehypnotic@gmail.com', pin)
+      .then(proceed)
+      .catch(() => { setError('Pogrešna lozinka! Pokušaj ponovo.'); setPin(''); });
   };
 
   return (
@@ -6414,7 +6420,17 @@ function App({ initialData }) {
       } catch(e) { console.warn('localStorage quota exceeded, using Firebase only'); }
       setData(merged);
     };
-    ref.on('value', handler);
+    // Čitaj bazu tek kad je Firebase prijava aktivna (baza je zaključana pravilima).
+    let started = false;
+    const startIfAuthed = (user) => {
+      if (user && !started) { started = true; ref.on('value', handler); }
+      else if (!user && started) { started = false; ref.off('value', handler); }
+    };
+    if (window.firebase && firebase.auth) {
+      const unsub = firebase.auth().onAuthStateChanged(startIfAuthed);
+      return () => { unsub && unsub(); ref.off('value', handler); };
+    }
+    ref.on('value', handler);  // fallback ako Firebase Auth nije učitan
     return () => ref.off('value', handler);
   }, []);
 
