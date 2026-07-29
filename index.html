@@ -235,7 +235,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[] };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[] };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -282,6 +282,7 @@ function mergeWithFirebase(fbData) {
     alatInventar:    fbObjToArr(fbData.alatInventar),
     alatRadovi:      fbObjToArr(fbData.alatRadovi),
     pointsLedger:    fbObjToArr(fbData.pointsLedger),
+    verifications:   fbObjToArr(fbData.verifications),
   };
 }
 
@@ -353,6 +354,7 @@ function saveData(data) {
     alatInventar:    toFbObj(data.alatInventar),
     alatRadovi:      toFbObj(data.alatRadovi),
     pointsLedger:    toFbObj(data.pointsLedger),
+    verifications:   toFbObj(data.verifications),
   };
   // Use update() to avoid overwriting inventory/consumptions with empty values
   __db.ref(FB_PATH).update(fbData).catch(err => {
@@ -367,6 +369,8 @@ function saveData(data) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 const today = () => new Date().toISOString().slice(0,10);
+// Današnji datum prema zoni Europe/Zagreb (za prikaz djelatnici — ne ovisi o UTC/preglednik zoni)
+const todayZagreb = () => { try { return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Zagreb'}).format(new Date()); } catch(e){ return today(); } };
 const fmt = n => Number(n||0).toLocaleString('hr-HR', {minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = d => { if(!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}.${m}.${y}`; };
 const monthKey = d => d ? d.slice(0,7) : '';
@@ -2949,6 +2953,9 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
                   border: `1px solid ${s.role==='praktikantica'?'#FFCC80':'#A5D6A7'}`}}>
                   {s.role==='praktikantica'?'praktikantica':'djelatnica'}
                 </span>
+                <input defaultValue={s.pin||''} placeholder="PIN" title="PIN za ekran 'Provjera današnjeg prometa'"
+                  onBlur={e=>{ const v=e.target.value.trim(); if(v!==(s.pin||'')) save({...data,staff:data.staff.map(x=>x.id===s.id?{...x,pin:v}:x)}); }}
+                  style={{width:64,padding:'3px 8px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:12,textAlign:'center'}} />
                 {/* Salon toggle buttons */}
                 <div style={{display:'flex',gap:3}}>
                   {[['savska','Savska','#9A6A3C'],['dobojska','Dobojska','#C9A66B'],['all','Oba','#888']].map(([sid,slbl,scol])=>(
@@ -4450,6 +4457,27 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
 
   return (
     <div>
+      {/* Prijavljena neslaganja djelatnica (iz ekrana "Provjera današnjeg prometa") */}
+      {(() => {
+        const neslaganja = (data.verifications||[]).filter(v=>v.status==='neslaganje');
+        if (!neslaganja.length) return null;
+        const eById = id => (data.entries||[]).find(e=>e.id===id);
+        const resolve = (v) => { const nd={...data, verifications:data.verifications.map(x=>x.id===v.id?{...x,status:'resolved',resolvedAt:new Date().toISOString()}:x)}; saveData(nd); onRefresh(nd); };
+        return (
+          <div className="card" style={{marginBottom:16,borderLeft:'4px solid #B4544A'}}>
+            <div className="card-title" style={{color:'#B4544A'}}>⚠ Prijavljena neslaganja djelatnica ({neslaganja.length})</div>
+            {neslaganja.map(v=>{ const e=eById(v.entryId); return (
+              <div key={v.id} style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',padding:'8px 0',borderBottom:'1px solid #F0E0DE',fontSize:13}}>
+                <span style={{fontWeight:700}}>{v.staffName}</span>
+                <span style={{color:'#888'}}>{(data.salons.find(s=>s.id===v.salon)||{}).name||v.salon} · {fmtDate(v.date)}</span>
+                {e && <span>{e.service} · €{fmt(e.total)} · {normPayment(e.payment)}</span>}
+                <span style={{color:'#B4544A'}}>„{v.note||'(bez napomene)'}"</span>
+                <button className="btn btn-outline btn-sm" style={{marginLeft:'auto'}} onClick={()=>resolve(v)}>✔ Riješeno</button>
+              </div>
+            );})}
+          </div>
+        );
+      })()}
       {/* Controls */}
       <div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center',flexWrap:'wrap',background:'var(--card)',borderRadius:12,padding:'12px 16px',border:'1.5px solid var(--border)'}}>
         {[['month','Ovaj mj.'],['prev','Prošli mj.'],['custom','Po datumima']].map(([k,l])=>(
@@ -6397,6 +6425,139 @@ function Alati({ data, salonId, onRefresh, onSwitchTab }) {
 }
 
 // ─── App root ─────────────────────────────────────────────────────────────
+// ─── Provjera današnjeg prometa — prikaz za DJELATNICU (samo ona + samo danas) ───
+// OGRANIČENO NA FRONTEND (Opcija A, odluka vlasnice 29.7.2026): identitet = PIN po djelatnici,
+// filtrira se na prijavljeni salon + današnji datum (Europe/Zagreb) + vlastite zapise.
+// NAPOMENA: podaci su u pregledniku pa ovo nije neprobojna zaštita (nema backenda). Admin vidi sve.
+function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh }) {
+  const [pin, setPin]   = useState('');
+  const [me, setMe]     = useState(null);   // identificirana djelatnica (iz PIN-a)
+  const [err, setErr]   = useState('');
+  const [flagId, setFlagId] = useState(null); // zapis za koji se prijavljuje neslaganje
+  const [flagNote, setFlagNote] = useState('');
+
+  const todayStr  = todayZagreb();
+  const salonName = (data.salons.find(s=>s.id===salonId)||{}).name || salonId;
+
+  const tryPin = () => {
+    const p = String(pin).trim();
+    if (!p) return;
+    const staff = (data.staff||[]).find(s =>
+      s.pin && String(s.pin).trim()===p &&
+      (!s.salonId || s.salonId==='all' || s.salonId===salonId)
+    );
+    if (staff) { setMe(staff); setErr(''); setPin(''); }
+    else { setErr('Pogrešan PIN.'); setPin(''); }
+  };
+
+  const myEntries = useMemo(()=>{
+    if (!me) return [];
+    const mine = normStName(me.name);
+    return (data.entries||[])
+      .filter(e => e.salon===salonId && e.date===todayStr && normStName(e.staff)===mine)
+      .sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
+  }, [me, data.entries, salonId, todayStr]);
+
+  const verifications = data.verifications||[];
+  const vFor = id => verifications.find(v=>v.entryId===id);
+  const timeOf = e => { try { return new Date(e.createdAt).toLocaleTimeString('hr-HR',{timeZone:'Europe/Zagreb',hour:'2-digit',minute:'2-digit'}); } catch(x){ return ''; } };
+
+  const setStatus = (entry, status, note='') => {
+    // Izvorni zapis se NE mijenja — samo se dodaje/zamjenjuje oznaka provjere.
+    const rest = verifications.filter(v=>v.entryId!==entry.id);
+    const rec = { id: uid(), entryId: entry.id, staffName: me.name, salon: salonId, date: todayStr, status, note, at: new Date().toISOString() };
+    const nd = { ...data, verifications: [...rest, rec] };
+    saveData(nd); onRefresh(nd);
+    setFlagId(null); setFlagNote('');
+  };
+
+  // ── PIN ekran ──
+  if (!me) {
+    return (
+      <div className="card" style={{maxWidth:360,margin:'32px auto',textAlign:'center'}}>
+        <div className="card-title" style={{justifyContent:'center'}}>🔒 Provjera današnjeg prometa</div>
+        <p style={{color:'#888',fontSize:13,margin:'8px 0 16px'}}>Unesi svoj PIN da vidiš <strong>svoj</strong> današnji promet ({salonName}).</p>
+        <input type="password" inputMode="numeric" value={pin} autoFocus
+          onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==='Enter'&&tryPin()}
+          placeholder="PIN" style={{width:'100%',padding:'10px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:18,textAlign:'center',letterSpacing:4}} />
+        {err && <div style={{color:'var(--red,#B4544A)',fontSize:13,marginTop:8}}>{err}</div>}
+        <button className="btn btn-primary" style={{width:'100%',marginTop:14}} onClick={tryPin}>Prijava</button>
+        <p style={{color:'#bbb',fontSize:11,marginTop:12}}>PIN ti dodjeljuje vlasnica (Postavke → Djelatnice).</p>
+      </div>
+    );
+  }
+
+  // ── Prikaz njezinih današnjih zapisa ──
+  return (
+    <div>
+      <div className="card-title" style={{fontSize:20}}>🧾 Provjera današnjeg prometa</div>
+      <div style={{display:'flex',gap:16,flexWrap:'wrap',alignItems:'center',color:'#666',fontSize:14,margin:'2px 0 16px'}}>
+        <span>👤 <strong>{me.name}</strong></span>
+        <span>🏢 {salonName}</span>
+        <span>📅 {fmtDate(todayStr)}</span>
+        <button className="btn btn-outline btn-sm" style={{marginLeft:'auto'}} onClick={()=>setMe(null)}>Zaključaj / promijeni curu</button>
+      </div>
+
+      {myEntries.length===0 ? (
+        <div className="card" style={{textAlign:'center',color:'#999',padding:28}}>Za današnji datum nema evidentiranih zapisa.</div>
+      ) : (
+        <div className="card" style={{padding:0,overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead>
+              <tr style={{background:'var(--dark)',color:'#fff'}}>
+                <th style={{textAlign:'left',padding:'9px 10px',fontSize:11}}>VRIJEME</th>
+                <th style={{textAlign:'left',padding:'9px 10px',fontSize:11}}>ŠIFRA</th>
+                <th style={{textAlign:'left',padding:'9px 10px',fontSize:11}}>USLUGA</th>
+                <th style={{textAlign:'left',padding:'9px 10px',fontSize:11}}>PLAĆANJE</th>
+                <th style={{textAlign:'right',padding:'9px 10px',fontSize:11}}>IZNOS</th>
+                <th style={{textAlign:'center',padding:'9px 10px',fontSize:11}}>PROVJERA</th>
+              </tr>
+            </thead>
+            <tbody>
+              {myEntries.map((e,i)=>{
+                const v = vFor(e.id);
+                return (
+                  <React.Fragment key={e.id}>
+                  <tr style={{borderBottom:'1px solid #eee',background:i%2?'#FAFAFA':'#fff'}}>
+                    <td style={{padding:'8px 10px',fontSize:13,whiteSpace:'nowrap'}}>{timeOf(e)}</td>
+                    <td style={{padding:'8px 10px',fontSize:12,color:'#999'}}>{String(e.id).slice(0,6)}</td>
+                    <td style={{padding:'8px 10px',fontSize:13}}>{e.service}</td>
+                    <td style={{padding:'8px 10px',fontSize:13}}>{normPayment(e.payment)}</td>
+                    <td style={{padding:'8px 10px',fontSize:14,fontWeight:700,textAlign:'right',whiteSpace:'nowrap'}}>€{fmt(e.total)}</td>
+                    <td style={{padding:'8px 10px',textAlign:'center',whiteSpace:'nowrap'}}>
+                      {v && v.status==='ok' && <span style={{color:'var(--green,#2E8B57)',fontWeight:700,fontSize:13}}>✔ Provjereno</span>}
+                      {v && v.status==='neslaganje' && <span style={{color:'var(--red,#B4544A)',fontWeight:700,fontSize:13}}>⚠ Neslaganje</span>}
+                      {!v && (
+                        <span style={{display:'inline-flex',gap:6}}>
+                          <button className="btn btn-sm" style={{background:'#E4F3EA',color:'#2E8B57',border:'none'}} onClick={()=>setStatus(e,'ok')}>✔ OK</button>
+                          <button className="btn btn-sm" style={{background:'#FBE9E9',color:'#B4544A',border:'none'}} onClick={()=>{setFlagId(e.id);setFlagNote('');}}>⚠ Neslaganje</button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                  {flagId===e.id && (
+                    <tr><td colSpan={6} style={{padding:'10px 12px',background:'#FFF6F5'}}>
+                      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                        <span style={{fontSize:13,color:'#B4544A',fontWeight:600}}>Opiši neslaganje:</span>
+                        <input value={flagNote} onChange={x=>setFlagNote(x.target.value)} autoFocus
+                          placeholder="npr. iznos ne odgovara, kriva usluga…" style={{flex:1,minWidth:180,padding:'6px 10px',border:'1.5px solid #E4B4B0',borderRadius:7,fontSize:13}} />
+                        <button className="btn btn-sm" style={{background:'#B4544A',color:'#fff',border:'none'}} onClick={()=>setStatus(e,'neslaganje',flagNote)}>Prijavi</button>
+                        <button className="btn btn-outline btn-sm" onClick={()=>setFlagId(null)}>Odustani</button>
+                      </div>
+                    </td></tr>
+                  )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{color:'#bbb',fontSize:11,marginTop:12}}>Vidiš samo svoje današnje zapise. Iznose i podatke ne mijenjaš — kod neslaganja se otvara zadatak vlasnici, izvorni zapis ostaje netaknut.</p>
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -6530,7 +6691,9 @@ function App({ initialData }) {
         {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh} activeStaff={activeStaff}/>}
         {tab==='skladiste'   && <Skladiste   data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
-        {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
+        {tab==='provjera'    && (salonId==='all'
+            ? <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>
+            : <ProvjeraDjelatnica data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>)}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
