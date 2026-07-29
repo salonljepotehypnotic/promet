@@ -1178,7 +1178,7 @@ function Statistike({ data, salonId }) {
     const sn = normStName(e.staff);
     if (!staffMap[sn]) staffMap[sn] = {rev:0, count:0};
     staffMap[sn].count++;
-    if (prometPayments.includes(e.payment)) {
+    if (prometPayments.includes(normPayment(e.payment))) {
       staffMap[sn].rev += (e.total||0);
     }
   });
@@ -1194,23 +1194,23 @@ function Statistike({ data, salonId }) {
 
   // Monthly staff revenue breakdown
   const monthlyStaffMap = {};
-  base.forEach(e=>{
+  filtered.forEach(e=>{
     if (!e.staff) return;
     const sn = normStName(e.staff);
     const m = e.date.slice(0,7);
     if (!monthlyStaffMap[m]) monthlyStaffMap[m] = {};
     if (!monthlyStaffMap[m][sn]) monthlyStaffMap[m][sn] = 0;
-    if (prometPayments.includes(e.payment)) {
+    if (prometPayments.includes(normPayment(e.payment))) {
       monthlyStaffMap[m][sn] += (e.total||0);
     }
   });
   const recentMonths = Object.keys(monthlyStaffMap).sort().slice(-6);
   // Only show staff currently in active staff list (normalized), deduped, sorted by entry order
   const activeStaffNormSet = new Set(data.staff.map(s => normStName(s.name)));
-  const allStaffNames = [...new Set(base.map(e=>normStName(e.staff)).filter(s=>s&&activeStaffNormSet.has(s)))].sort(staffOrderSort);
+  const allStaffNames = [...new Set(filtered.map(e=>normStName(e.staff)).filter(s=>s&&activeStaffNormSet.has(s)))].sort(staffOrderSort);
 
   const monthlyMap = {};
-  base.forEach(e=>{const m=e.date.slice(0,7);monthlyMap[m]=(monthlyMap[m]||0)+e.total;});
+  filtered.forEach(e=>{const m=e.date.slice(0,7);monthlyMap[m]=(monthlyMap[m]||0)+e.total;});
   const months = Object.keys(monthlyMap).sort().slice(-8);
   const maxM = Math.max(...months.map(m=>monthlyMap[m]),1);
 
@@ -1317,7 +1317,7 @@ function Statistike({ data, salonId }) {
     const result = {};
     allStaffNames.forEach(name=>{
       const cats = {};
-      filtered.filter(e=>normStName(e.staff)===name&&prometPayments.includes(e.payment)).forEach(e=>{
+      filtered.filter(e=>normStName(e.staff)===name&&prometPayments.includes(normPayment(e.payment))).forEach(e=>{
         const cat = svcCategoryMap[e.service]||'Ostalo';
         cats[cat] = (cats[cat]||0)+(e.total||0);
       });
@@ -1368,7 +1368,7 @@ function Statistike({ data, salonId }) {
     });
     const monthlyRev = {};
     staffEntries.forEach(e=>{
-      if (prometPayments.includes(e.payment)) {
+      if (prometPayments.includes(normPayment(e.payment))) {
         const m = e.date.slice(0,7);
         monthlyRev[m]=(monthlyRev[m]||0)+(e.total||0);
       }
@@ -1380,7 +1380,7 @@ function Statistike({ data, salonId }) {
     );
 
     // Revenue in selected period
-    const revPeriod = periodEntries.filter(e=>prometPayments.includes(e.payment)).reduce((s,e)=>s+(e.total||0),0);
+    const revPeriod = periodEntries.filter(e=>prometPayments.includes(normPayment(e.payment))).reduce((s,e)=>s+(e.total||0),0);
 
     // Previous same-length period for trend comparison
     let prevRevPeriod = 0;
@@ -1390,7 +1390,7 @@ function Statistike({ data, salonId }) {
       const lenMs  = toMs - fromMs;
       const prevTo   = new Date(fromMs - 1).toISOString().slice(0,10);
       const prevFrom = new Date(fromMs - lenMs).toISOString().slice(0,10);
-      prevRevPeriod  = staffEntries.filter(e=>e.date>=prevFrom&&e.date<=prevTo&&prometPayments.includes(e.payment)).reduce((s,e)=>s+(e.total||0),0);
+      prevRevPeriod  = staffEntries.filter(e=>e.date>=prevFrom&&e.date<=prevTo&&prometPayments.includes(normPayment(e.payment))).reduce((s,e)=>s+(e.total||0),0);
     }
     const trendPct = prevRevPeriod>0 ? Math.round((revPeriod-prevRevPeriod)/prevRevPeriod*100) : (revPeriod>0?100:0);
 
@@ -1414,7 +1414,7 @@ function Statistike({ data, salonId }) {
     const svcRevMap={}, svcCntMap={};
     periodEntries.forEach(e=>{
       svcCntMap[e.service]=(svcCntMap[e.service]||0)+1;
-      if (prometPayments.includes(e.payment)) svcRevMap[e.service]=(svcRevMap[e.service]||0)+(e.total||0);
+      if (prometPayments.includes(normPayment(e.payment))) svcRevMap[e.service]=(svcRevMap[e.service]||0)+(e.total||0);
     });
     const topSvc = Object.entries(svcRevMap).sort((a,b)=>b[1]-a[1]).slice(0,10);
 
