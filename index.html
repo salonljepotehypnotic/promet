@@ -355,7 +355,14 @@ function saveData(data) {
     pointsLedger:    toFbObj(data.pointsLedger),
   };
   // Use update() to avoid overwriting inventory/consumptions with empty values
-  __db.ref(FB_PATH).update(fbData).catch(err => console.warn('Firebase save error:', err));
+  __db.ref(FB_PATH).update(fbData).catch(err => {
+    console.warn('Firebase save error:', err);
+    const code = ((err && (err.code || err.message)) || '').toString().toLowerCase();
+    if (code.includes('permission') || code.includes('denied')) {
+      try { window.__dbWriteDenied = true; window.dispatchEvent(new Event('db-write-denied')); } catch(e){}
+      alert('⚠️ SPREMANJE NIJE USPJELO — niste prijavljeni u bazu.\n\nOvaj unos NIJE spremljen! Molimo:\n1) Odjava (gumb gore desno)\n2) Ponovna prijava lozinkom\n3) Upišite unos ponovno.');
+    }
+  });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -6405,6 +6412,17 @@ function App({ initialData }) {
   });
   const refresh = useCallback(d=>setData(d),[]);
   const logout  = () => { sessionStorage.removeItem('hypnotic_session'); setSalonId(null); };
+  // Prati je li uređaj stvarno prijavljen u (zaključanu) bazu — inače spremanje ne radi.
+  const [dbAuthed, setDbAuthed] = useState(null); // null=nepoznato, true=prijavljen, false=NIJE
+  useEffect(() => {
+    const onDenied = () => setDbAuthed(false);
+    window.addEventListener('db-write-denied', onDenied);
+    if (window.firebase && firebase.auth) {
+      const unsub = firebase.auth().onAuthStateChanged(u => setDbAuthed(!!u));
+      return () => { unsub && unsub(); window.removeEventListener('db-write-denied', onDenied); };
+    }
+    return () => window.removeEventListener('db-write-denied', onDenied);
+  }, []);
 
   // ── Aktivna djelatnica (tko unosi) + auto-povratak nakon 2 min neaktivnosti ──
   const [activeStaff, setActiveStaff] = useState(()=>{ try{return sessionStorage.getItem('hypnotic_active_staff')||'';}catch(e){return '';} });
@@ -6461,6 +6479,14 @@ function App({ initialData }) {
 
   return (
     <div>
+      {salonId && dbAuthed===false && (
+        <div style={{background:'#B4544A',color:'#fff',padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:14,lineHeight:1.5}}>
+          ⚠️ NISTE PRIJAVLJENI U BAZU — spremanje prometa NEĆE raditi i unosi se gube!
+          <button onClick={logout} style={{marginLeft:14,background:'#fff',color:'#B4544A',border:'none',borderRadius:8,padding:'6px 14px',fontWeight:700,cursor:'pointer'}}>
+            Odjava i ponovna prijava lozinkom
+          </button>
+        </div>
+      )}
       <div className="app-header">
         <div className="app-logo">HYPNOTIC <span>SALON</span></div>
         <div className="salon-badge">
