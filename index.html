@@ -4407,7 +4407,7 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
   const grandTotals = useMemo(()=>{
     const t={};
     entries.forEach(e=>{
-      if (PROVJERA_EXCLUDE.has(normPayment(e.payment))) return;
+      if (!STAFF_PROMET.includes(normPayment(e.payment))) return;
       const st=normSt(e.staff); t[st]=(t[st]||0)+(e.total||0);
     });
     return t;
