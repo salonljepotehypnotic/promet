@@ -6445,11 +6445,10 @@ function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh, activeStaff })
   const tryPin = () => {
     const p = String(pin).trim();
     if (!p) return;
-    const staff = (data.staff||[]).find(s =>
-      s.pin && String(s.pin).trim()===p &&
-      (!s.salonId || s.salonId==='all' || s.salonId===salonId)
-    );
+    // PIN prepoznaje curu neovisno o salonu (njezini zapisi se ionako filtriraju po salonu+danu).
+    const staff = (data.staff||[]).find(s => s.pin && String(s.pin).trim()===p);
     if (staff) { setMe(staff); setErr(''); setPin(''); }
+    else if (!(data.staff||[]).some(s=>s.pin)) { setErr('Nijedna djelatnica još nema PIN — postavi ih (Administrator → Postavke → Djelatnice).'); }
     else { setErr('Pogrešan PIN.'); setPin(''); }
   };
 
