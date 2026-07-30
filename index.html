@@ -6555,6 +6555,30 @@ function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh }) {
           </table>
         </div>
       )}
+      {myEntries.length>0 && (()=>{
+        const m={}; myEntries.forEach(e=>{ const p=normPayment(e.payment)||'—'; m[p]=(m[p]||0)+(e.total||0); });
+        const rows=Object.entries(m).sort((a,b)=>b[1]-a[1]);
+        const grand=myEntries.reduce((s,e)=>s+(e.total||0),0);
+        return (
+          <div className="card" style={{marginTop:16,maxWidth:440}}>
+            <div className="card-title" style={{fontSize:15}}>💰 Ukupno danas — po načinu plaćanja</div>
+            <table style={{width:'100%',borderCollapse:'collapse'}}>
+              <tbody>
+                {rows.map(([p,v])=>(
+                  <tr key={p} style={{borderBottom:'1px solid #eee'}}>
+                    <td style={{padding:'7px 10px',fontSize:13}}>{p}</td>
+                    <td style={{padding:'7px 10px',fontSize:14,fontWeight:700,textAlign:'right',whiteSpace:'nowrap'}}>€{fmt(v)}</td>
+                  </tr>
+                ))}
+                <tr style={{background:'var(--dark)',color:'#fff',fontWeight:700}}>
+                  <td style={{padding:'8px 10px'}}>UKUPNO</td>
+                  <td style={{padding:'8px 10px',textAlign:'right'}}>€{fmt(grand)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
       <p style={{color:'#bbb',fontSize:11,marginTop:12}}>Vidiš samo svoje današnje zapise. Iznose i podatke ne mijenjaš — kod neslaganja se otvara zadatak vlasnici, izvorni zapis ostaje netaknut.</p>
     </div>
   );
