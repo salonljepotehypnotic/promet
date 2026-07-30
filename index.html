@@ -6578,13 +6578,10 @@ function App({ initialData }) {
   // Prati je li uređaj stvarno prijavljen u (zaključanu) bazu — inače spremanje ne radi.
   const [dbAuthed, setDbAuthed] = useState(null); // null=nepoznato, true=prijavljen, false=NIJE
   useEffect(() => {
-    const onDenied = () => setDbAuthed(false);
-    window.addEventListener('db-write-denied', onDenied);
+    // dbAuthed prati ISKLJUČIVO stvarno stanje Firebase prijave (izbjegava petlju prijave).
     if (window.firebase && firebase.auth) {
-      const unsub = firebase.auth().onAuthStateChanged(u => setDbAuthed(!!u));
-      return () => { unsub && unsub(); window.removeEventListener('db-write-denied', onDenied); };
+      return firebase.auth().onAuthStateChanged(u => setDbAuthed(!!u));
     }
-    return () => window.removeEventListener('db-write-denied', onDenied);
   }, []);
 
   // ── Aktivna djelatnica (tko unosi) + auto-povratak nakon 2 min neaktivnosti ──
@@ -6601,6 +6598,10 @@ function App({ initialData }) {
     return () => { clearTimeout(t); evs.forEach(e=>window.removeEventListener(e, reset)); };
   }, [salonId, activeStaff]);
 
+  // Ref na trenutne podatke (za sync handler — da sačuva lokalne nespremljene unose)
+  const dataRef = useRef(data);
+  useEffect(()=>{ dataRef.current = data; }, [data]);
+
   // ── Real-time Firebase sync ──────────────────────────────────────────────
   useEffect(() => {
     if (!__db) return;
@@ -6610,6 +6611,21 @@ function App({ initialData }) {
       if (ignoreNext) { ignoreNext = false; return; }
       if (!snap.exists()) return;
       const merged = mergeWithFirebase(snap.val());
+      // ── Sačuvaj lokalne NESPREMLJENE unose (nedavne) da ih sinkronizacija ne izgubi ──
+      // Ako uređaj ima unose kojih još nema u bazi (npr. upisano dok nije bio prijavljen),
+      // dodaj ih u prikaz I ciljano prenesi u bazu (bez prepisivanja tuđih unosa).
+      try {
+        const fbIds = new Set(merged.entries.map(e=>e.id));
+        const cutoff = Date.now() - 7*24*60*60*1000; // samo nedavni (7 dana) — da ne oživi stare obrisane
+        const localOnly = (dataRef.current.entries||[]).filter(e =>
+          e && e.id && !SEED_ENTRY_IDS.has(e.id) && !fbIds.has(e.id) &&
+          e.createdAt && new Date(e.createdAt).getTime() >= cutoff);
+        if (localOnly.length && __db) {
+          merged.entries = [...merged.entries, ...localOnly];
+          const upd = {}; localOnly.forEach(e=>{ upd['entries/'+e.id] = e; });
+          __db.ref(FB_PATH).update(upd).catch(err=>console.warn('Prijenos lokalnih unosa nije uspio:', err));
+        }
+      } catch(e) { console.warn('resync merge error:', e); }
       try {
         const compact = {...merged, entries: merged.entries.filter(e=>!SEED_ENTRY_IDS.has(e.id)), clients:(merged.clients||[]).filter(c=>!SEED_CLIENT_IDS.has(c.id))};
         localStorage.setItem(STORE_KEY, JSON.stringify(compact));
@@ -6631,6 +6647,11 @@ function App({ initialData }) {
   }, []);
 
   if (!salonId) return <LoginScreen data={data} onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
+  // TRAŽI PRIJAVU U BAZU: ako uređaj ima sesiju ali NIJE prijavljen u Firebase (dbAuthed===false),
+  // prikaži login da se ponovno prijavi lozinkom — nema više rada "mimo baze" (tiho gubljenje).
+  if (salonId && dbAuthed===false && window.firebase && firebase.auth) {
+    return <LoginScreen data={data} reauth onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
+  }
 
   const salon = data.salons.find(s=>s.id===salonId);
   const salonColor = salonId==='all'?'var(--dark)':(salon?.color||'var(--teal)');
