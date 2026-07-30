@@ -6430,12 +6430,14 @@ function Alati({ data, salonId, onRefresh, onSwitchTab }) {
 // OGRANIČENO NA FRONTEND (Opcija A, odluka vlasnice 29.7.2026): identitet = PIN po djelatnici,
 // filtrira se na prijavljeni salon + današnji datum (Europe/Zagreb) + vlastite zapise.
 // NAPOMENA: podaci su u pregledniku pa ovo nije neprobojna zaštita (nema backenda). Admin vidi sve.
-function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh }) {
+function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh, activeStaff }) {
   const [pin, setPin]   = useState('');
   const [me, setMe]     = useState(null);   // identificirana djelatnica (iz PIN-a)
   const [err, setErr]   = useState('');
   const [flagId, setFlagId] = useState(null); // zapis za koji se prijavljuje neslaganje
   const [flagNote, setFlagNote] = useState('');
+  // Kad se gore zamijeni cura ("Tko unosi?"), resetiraj Provjeru → traži PIN nove cure.
+  useEffect(()=>{ setMe(null); setPin(''); setErr(''); }, [activeStaff]);
 
   const todayStr  = todayZagreb();
   const salonName = (data.salons.find(s=>s.id===salonId)||{}).name || salonId;
@@ -6740,7 +6742,7 @@ function App({ initialData }) {
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='provjera'    && (salonId==='all'
             ? <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>
-            : <ProvjeraDjelatnica data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>)}
+            : <ProvjeraDjelatnica data={data} salonId={salonId} saveData={saveData} onRefresh={refresh} activeStaff={activeStaff}/>)}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
