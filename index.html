@@ -6451,11 +6451,12 @@ function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh }) {
     else { setErr('Pogrešan PIN.'); setPin(''); }
   };
 
+  const nrm = s => (s||'').toUpperCase().trim();   // lokalni normalizator (bez ovisnosti o Statistike)
   const myEntries = useMemo(()=>{
     if (!me) return [];
-    const mine = normStName(me.name);
+    const mine = nrm(me.name);
     return (data.entries||[])
-      .filter(e => e.salon===salonId && e.date===todayStr && normStName(e.staff)===mine)
+      .filter(e => e.salon===salonId && e.date===todayStr && nrm(e.staff)===mine)
       .sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
   }, [me, data.entries, salonId, todayStr]);
 
