@@ -235,7 +235,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[] };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{} };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -283,6 +283,7 @@ function mergeWithFirebase(fbData) {
     alatRadovi:      fbObjToArr(fbData.alatRadovi),
     pointsLedger:    fbObjToArr(fbData.pointsLedger),
     verifications:   fbObjToArr(fbData.verifications),
+    staffPins:       fbData.staffPins || {},
   };
 }
 
@@ -2953,8 +2954,11 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
                   border: `1px solid ${s.role==='praktikantica'?'#FFCC80':'#A5D6A7'}`}}>
                   {s.role==='praktikantica'?'praktikantica':'djelatnica'}
                 </span>
-                <input defaultValue={s.pin||''} placeholder="PIN" title="PIN za ekran 'Provjera današnjeg prometa'"
-                  onBlur={e=>{ const v=e.target.value.trim(); if(v!==(s.pin||'')) save({...data,staff:data.staff.map(x=>x.id===s.id?{...x,pin:v}:x)}); }}
+                <input defaultValue={(data.staffPins||{})[s.id]||s.pin||''} placeholder="PIN" title="PIN za ekran 'Provjera današnjeg prometa'"
+                  onBlur={e=>{ const v=e.target.value.trim(); const cur=(data.staffPins||{})[s.id]||s.pin||'';
+                    if(v!==cur){ const np={...(data.staffPins||{})}; if(v){np[s.id]=v;}else{delete np[s.id];}
+                      try{ if(__db) __db.ref(FB_PATH+'/staffPins/'+s.id).set(v||null); }catch(x){}
+                      onRefresh({...data, staffPins:np}); setToast({msg:'PIN spremljen!'}); } }}
                   style={{width:64,padding:'3px 8px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:12,textAlign:'center'}} />
                 {/* Salon toggle buttons */}
                 <div style={{display:'flex',gap:3}}>
@@ -6446,9 +6450,12 @@ function ProvjeraDjelatnica({ data, salonId, saveData, onRefresh, activeStaff })
     const p = String(pin).trim();
     if (!p) return;
     // PIN prepoznaje curu neovisno o salonu (njezini zapisi se ionako filtriraju po salonu+danu).
-    const staff = (data.staff||[]).find(s => s.pin && String(s.pin).trim()===p);
+    // Čita iz zaštićenog 'staffPins' (fallback na stari staff.pin).
+    const pinMap = data.staffPins||{};
+    const pinOf = s => pinMap[s.id] || s.pin;
+    const staff = (data.staff||[]).find(s => { const pn=pinOf(s); return pn && String(pn).trim()===p; });
     if (staff) { setMe(staff); setErr(''); setPin(''); }
-    else if (!(data.staff||[]).some(s=>s.pin)) { setErr('Nijedna djelatnica još nema PIN — postavi ih (Administrator → Postavke → Djelatnice).'); }
+    else if (!(data.staff||[]).some(s=>pinOf(s))) { setErr('Nijedna djelatnica još nema PIN — postavi ih (Administrator → Postavke → Djelatnice).'); }
     else { setErr('Pogrešan PIN.'); setPin(''); }
   };
 
@@ -6739,9 +6746,7 @@ function App({ initialData }) {
         {tab==='klijentice'  && <Klijentice  data={data} salonId={salonId} onRefresh={refresh} activeStaff={activeStaff}/>}
         {tab==='skladiste'   && <Skladiste   data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
-        {tab==='provjera'    && (salonId==='all'
-            ? <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>
-            : <ProvjeraDjelatnica data={data} salonId={salonId} saveData={saveData} onRefresh={refresh} activeStaff={activeStaff}/>)}
+        {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
