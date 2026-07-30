@@ -2730,7 +2730,7 @@ function Skladiste({ data, salonId, onRefresh }) {
 // ─── Postavke ─────────────────────────────────────────────────────────────
 function Postavke({ data, onRefresh, salonId, onLogout }) {
   const isAdmin = salonId === 'all';
-  const [tab,  setTab]  = useState(isAdmin ? 'pins' : 'services');
+  const [tab,  setTab]  = useState(isAdmin ? 'staff' : 'services');
   const [toast,setToast]= useState(null);
   const [pins, setPins] = useState(() => {
     const stored = JSON.parse(localStorage.getItem('hypnotic_pins')||'{}');
@@ -2872,7 +2872,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
       </div>}
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
         {(isAdmin
-          ? [['pins','🔐 Lozinke'],['salons','🏢 Saloni'],['staff','👩 Djelatnice'],['services','✨ Usluge'],['promet','💰 Promet-plaćanja'],['loyalty','⭐ Bodovi'],['backup','💾 Backup/Uvoz']]
+          ? [['salons','🏢 Saloni'],['staff','👩 Djelatnice'],['services','✨ Usluge'],['promet','💰 Promet-plaćanja'],['loyalty','⭐ Bodovi'],['backup','💾 Backup/Uvoz']]
           : [['services','✨ Usluge']]
         ).map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${tab===k?'btn-primary':'btn-outline'}`}
