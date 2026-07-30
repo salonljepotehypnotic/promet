@@ -2829,7 +2829,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
       const ws=wb.Sheets[wb.SheetNames[0]];
       const rows=XLSX.utils.sheet_to_json(ws);
       const newEntries=rows.map((row,i)=>({
-        id:uid(), salon:salonId==='all'?(data.salons[0]?.id||'savska'):salonId,
+        id:uid(), salon:(row['SALON']?String(row['SALON']).trim().toLowerCase():(salonId==='all'?(data.salons[0]?.id||'savska'):salonId)),
         date: row['DATUM']?String(row['DATUM']).slice(0,10):(row['GOD.']&&row['MJ.']&&row['DAN']?`${row['GOD.']}-${String(row['MJ.']).padStart(2,'0')}-${String(row['DAN']).padStart(2,'0')}`:today()),
         clientName: row['IME I PREZIME KLIJENTICE']||row['IME I PREZIME KLIJENTA']||'',
         staff: row['DJELATNICA']||row['DJELATNICI']||'',
