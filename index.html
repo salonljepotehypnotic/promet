@@ -2730,7 +2730,7 @@ function Skladiste({ data, salonId, onRefresh }) {
 // ─── Postavke ─────────────────────────────────────────────────────────────
 function Postavke({ data, onRefresh, salonId, onLogout }) {
   const isAdmin = salonId === 'all';
-  const [tab,  setTab]  = useState(isAdmin ? 'pins' : 'staff');
+  const [tab,  setTab]  = useState(isAdmin ? 'pins' : 'services');
   const [toast,setToast]= useState(null);
   const [pins, setPins] = useState(() => {
     const stored = JSON.parse(localStorage.getItem('hypnotic_pins')||'{}');
@@ -2861,7 +2861,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
   const toggleCat = cat => setSvcOpenCats(prev => { const n=new Set(prev); n.has(cat)?n.delete(cat):n.add(cat); return n; });
 
   const canEdit = salonId==='all';
-  const canEditStaff = true; // svi mogu upravljati djelatnicama
+  const canEditStaff = isAdmin; // upravljanje djelatnicama (i PIN-ovi) SAMO administrator
   const prometPayments = data.prometPayments || DEFAULT_PROMET_PAYMENTS;
 
   return (
@@ -2873,7 +2873,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
       <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
         {(isAdmin
           ? [['pins','🔐 Lozinke'],['salons','🏢 Saloni'],['staff','👩 Djelatnice'],['services','✨ Usluge'],['promet','💰 Promet-plaćanja'],['loyalty','⭐ Bodovi'],['backup','💾 Backup/Uvoz']]
-          : [['staff','👩 Djelatnice'],['services','✨ Usluge']]
+          : [['services','✨ Usluge']]
         ).map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${tab===k?'btn-primary':'btn-outline'}`}
             onClick={()=>setTab(k)}>{l}</button>
@@ -2936,7 +2936,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
         </div>
       )}
 
-      {tab==='staff' && (
+      {tab==='staff' && isAdmin && (
         <div className="card">
           <div className="card-title">👩 Djelatnice</div>
           <p style={{fontSize:12,color:'#999',marginBottom:12}}>Klikni salon da promijeniš dodjelu. Klikni <strong>👁 vidljivo / 🚫 skriveno</strong> da odabereš tko se pojavljuje na ekranu „Tko unosi?" (bez brisanja).</p>
