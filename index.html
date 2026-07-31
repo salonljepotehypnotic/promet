@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026073101;
+const APP_VERSION = 2026073102;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -353,7 +353,6 @@ function saveData(data) {
     consumptions:    encConsumptions(data.consumptions),
     prometPayments:  data.prometPayments || DEFAULT_PROMET_PAYMENTS,
     clients:         toFbObj(data.clients),
-    expenses:        toFbObj(data.expenses),
     tools:           toFbObj(data.tools),
     toolAssignments: toFbObj(data.toolAssignments),
     alatInventar:    toFbObj(data.alatInventar),
@@ -364,6 +363,9 @@ function saveData(data) {
   // KLJUČNO: unosi (promet) se pišu CILJANO (per-id) — uređaj samo dodaje/mijenja SVOJE unose,
   // NE prepisuje cijeli popis, pa ne može izbrisati tuđe (npr. drugog salona ili druge cure).
   newEntries.forEach(e => { if (e && e.id) fbData['entries/'+e.id] = e; });
+  // ISTO za troškove (expenses) — ciljani per-id zapis, da stari/nesinkroniziran uređaj
+  // ne može prepisati/izbrisati cijeli popis troškova. Brisanje ide preko remove() u delExpense.
+  (data.expenses||[]).forEach(x => { if (x && x.id) fbData['expenses/'+x.id] = x; });
   // Use update() to avoid overwriting inventory/consumptions with empty values
   __db.ref(FB_PATH).update(fbData).catch(err => {
     console.warn('Firebase save error:', err);
@@ -5391,6 +5393,8 @@ function Troskovi({ data, salonId, onRefresh }) {
 
   const delExpense = id => {
     if (!confirm('Obriši trošak?')) return;
+    // Ciljano makni iz baze (troškovi se sada pišu per-id, inače bi se vratio pri sinkronizaciji)
+    try { if (__db) __db.ref(FB_PATH+'/expenses/'+id).remove(); } catch(x){}
     save({...data, expenses:expenses.filter(e=>e.id!==id)});
   };
 
