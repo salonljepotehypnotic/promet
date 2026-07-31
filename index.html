@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026073103;
+const APP_VERSION = 2026073104;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -4366,14 +4366,15 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
   const thisMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
   const prevMonthDate = new Date(now2.getFullYear(), now2.getMonth()-1, 1);
   const prevMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth()+1).padStart(2,'0')}`;
-  const [period, setPeriod] = useState('today');
+  const [period, setPeriod] = useState('month');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [prvSalon, setPrvSalon] = useState(salonId==='all' ? 'all' : salonId);
   const [prvView, setPrvView] = useState('simple'); // 'simple' | 'staff'
 
   const {from, to} = useMemo(()=>{
-    if (period==='today') { const t=todayZagreb(); return {from:t, to:t}; }
+    // "Danas" je namjerno uklonjen s ovog admin ekrana (mjesečni/povijesni pregled bonusa);
+    // dnevna kontrola ide u zaseban modul. Zadano razdoblje = Ovaj mjesec.
     if (period==='month') return {from:thisMonth+'-01', to:today()};
     if (period==='prev')  return {from:prevMonth+'-01', to:prevMonth+'-31'};
     return {from:fromDate||thisMonth+'-01', to:toDate||today()};
@@ -4496,7 +4497,7 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
       })()}
       {/* Controls */}
       <div style={{display:'flex',gap:8,marginBottom:12,alignItems:'center',flexWrap:'wrap',background:'var(--card)',borderRadius:12,padding:'12px 16px',border:'1.5px solid var(--border)'}}>
-        {[['today','Danas'],['month','Ovaj mj.'],['prev','Prošli mj.'],['custom','Po datumima']].map(([k,l])=>(
+        {[['month','Ovaj mj.'],['prev','Prošli mj.'],['custom','Po datumima']].map(([k,l])=>(
           <button key={k} className={`btn btn-sm ${period===k?'btn-primary':'btn-outline'}`} onClick={()=>setPeriod(k)}>{l}</button>
         ))}
         {period==='custom' && <>
