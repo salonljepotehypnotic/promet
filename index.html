@@ -342,7 +342,6 @@ function saveData(data) {
     staff:           data.staff,
     services:        data.services,
     payments:        data.payments,
-    entries:         toFbObj(newEntries),
     config:          data.config,
     inventory:       toFbObj(data.inventory),
     stock:           data.stock  || {},
@@ -357,6 +356,9 @@ function saveData(data) {
     pointsLedger:    toFbObj(data.pointsLedger),
     verifications:   toFbObj(data.verifications),
   };
+  // KLJUČNO: unosi (promet) se pišu CILJANO (per-id) — uređaj samo dodaje/mijenja SVOJE unose,
+  // NE prepisuje cijeli popis, pa ne može izbrisati tuđe (npr. drugog salona ili druge cure).
+  newEntries.forEach(e => { if (e && e.id) fbData['entries/'+e.id] = e; });
   // Use update() to avoid overwriting inventory/consumptions with empty values
   __db.ref(FB_PATH).update(fbData).catch(err => {
     console.warn('Firebase save error:', err);
@@ -998,6 +1000,8 @@ function Pregled({ data, salonId, onRefresh }) {
       ledger = [...ledger, ...reversals];
     }
     const nd={...data, entries:data.entries.filter(e=>e.id!==id), pointsLedger: ledger};
+    // Ciljano makni iz baze (jer se unosi sada pišu per-id, inače bi se vratio pri sinkronizaciji)
+    try { if (__db && !SEED_ENTRY_IDS.has(id)) __db.ref(FB_PATH+'/entries/'+id).remove(); } catch(x){}
     saveData(nd); onRefresh(nd); setToast({msg:'Unos obrisan.'});
   };
 
