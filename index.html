@@ -191,6 +191,11 @@ window.__firebaseDb = firebase.database();
 const SEED = JSON.parse(document.getElementById('seed-data').textContent);
 const STORE_KEY = 'hypnotic_promet_v2';
 const FB_PATH = 'hypnotic';
+// ── VERZIJA APLIKACIJE — POVEĆAJ kod SVAKOG deploya (format YYYYMMDD + 2 znamenke) ──
+// Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
+// osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
+// stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
+const APP_VERSION = 2026073101;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -6620,6 +6625,38 @@ function App({ initialData }) {
     }
   }, []);
 
+  // ── AUTO-AŽURIRANJE: uređaj se sam osvježi na najnoviju verziju ─────────────
+  // Najnoviji uređaj objavi APP_VERSION u bazu (/hypnotic/_appVersion). Stariji uređaji
+  // to vide preko listenera i SAMI se osvježe (dohvate novi kod). Time nestaje glavni
+  // uzrok gubljenja podataka: stari tab sa starim kodom više ne stigne prepisati bazu.
+  const [updateBanner, setUpdateBanner] = useState(false);
+  useEffect(() => {
+    if (!__db || dbAuthed !== true) return; // baza je zaključana — čitaj tek kad je prijava aktivna
+    const vref = __db.ref(FB_PATH + '/_appVersion');
+    const onVer = snap => {
+      const remote = Number(snap.val()) || 0;
+      if (remote > APP_VERSION) {
+        // Ovaj uređaj je na STAROJ verziji → osvježi se (jednom po verziji, uz zaštitu od petlje)
+        let tried = 0;
+        try { tried = Number(sessionStorage.getItem('__hypVReload')) || 0; } catch(e){}
+        if (tried < remote) {
+          try { sessionStorage.setItem('__hypVReload', String(remote)); } catch(e){}
+          // cache-bust: nova query vrijednost tjera preglednik da dohvati SVJEŽI HTML
+          try { location.replace(location.pathname + '?v=' + remote); }
+          catch(e){ location.reload(); }
+        } else {
+          // već pokušano za ovu verziju, a i dalje smo stari (tvrdoglav cache) → ponudi ručno
+          setUpdateBanner(true);
+        }
+      } else if (APP_VERSION > remote) {
+        // Ovaj uređaj je NAJNOVIJI → objavi verziju da se ostali uređaji osvježe
+        vref.set(APP_VERSION).catch(()=>{});
+      }
+    };
+    vref.on('value', onVer);
+    return () => vref.off('value', onVer);
+  }, [dbAuthed]);
+
   // ── Aktivna djelatnica (tko unosi) + auto-povratak nakon 2 min neaktivnosti ──
   const [activeStaff, setActiveStaff] = useState(()=>{ try{return sessionStorage.getItem('hypnotic_active_staff')||'';}catch(e){return '';} });
   const setActive = (name) => { setActiveStaff(name); try{ name?sessionStorage.setItem('hypnotic_active_staff',name):sessionStorage.removeItem('hypnotic_active_staff'); }catch(e){} };
@@ -6699,6 +6736,15 @@ function App({ initialData }) {
 
   return (
     <div>
+      {updateBanner && (
+        <div style={{background:'#2E7D46',color:'#fff',padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:14,lineHeight:1.5}}>
+          🔄 Dostupna je novija verzija aplikacije.
+          <button onClick={()=>{ try{sessionStorage.removeItem('__hypVReload');}catch(e){} location.replace(location.pathname + '?v=' + Date.now()); }}
+            style={{marginLeft:14,background:'#fff',color:'#2E7D46',border:'none',borderRadius:8,padding:'6px 14px',fontWeight:700,cursor:'pointer'}}>
+            Ažuriraj sada
+          </button>
+        </div>
+      )}
       {salonId && dbAuthed===false && (
         <div style={{background:'#B4544A',color:'#fff',padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:14,lineHeight:1.5}}>
           ⚠️ NISTE PRIJAVLJENI U BAZU — spremanje prometa NEĆE raditi i unosi se gube!
