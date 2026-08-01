@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026073105;
+const APP_VERSION = 2026073106;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -6618,46 +6618,49 @@ const kPill = st => ({otvoreno:['#EEE9DD','#7A6A3E'],provjereno:['var(--green-bg
 
 function Kontrola({ data, onRefresh }) {
   const salons = data.salons || [];
-  const [date, setDate]   = useState(todayZagreb());
-  const [salon, setSalon] = useState(salons[0]?.id || 'savska');
-  const [view, setView]   = useState('A');
-  const [edits, setEdits] = useState({});
-  const [toast, setToast] = useState('');
+  const [date, setDate]     = useState(todayZagreb());
+  const [salon, setSalon]   = useState(salons[0]?.id || 'savska');
+  const [view, setView]     = useState('B');
+  const [selStaff, setSelStaff] = useState('');
+  const [edits, setEdits]   = useState({});
+  const [toast, setToast]   = useState('');
 
   const dayEntries = useMemo(()=> (data.entries||[]).filter(e=>e && e.date===date && e.salon===salon), [data.entries, date, salon]);
   const byPay = useMemo(()=>{ const m={}; dayEntries.forEach(e=>{ const p=normPayment(e.payment)||e.payment||'?'; m[p]=(m[p]||0)+Number(e.total||0); }); return m; }, [dayEntries]);
   const pays  = useMemo(()=> Object.keys(byPay).sort(), [byPay]);
-  const byStaff = useMemo(()=>{ const m={}; dayEntries.forEach(e=>{ const s=(e.staff||'?'); m[s]=(m[s]||0)+Number(e.total||0); }); return m; }, [dayEntries]);
+  const byStaffPay = useMemo(()=>{ const m={}; dayEntries.forEach(e=>{ const s=e.staff||'?'; const p=normPayment(e.payment)||e.payment||'?'; (m[s]=m[s]||{}); m[s][p]=(m[s][p]||0)+Number(e.total||0); }); return m; }, [dayEntries]);
+  const staffList = useMemo(()=> Object.keys(byStaffPay).sort(), [byStaffPay]);
+  useEffect(()=>{ if(staffList.length && !staffList.includes(selStaff)) setSelStaff(staffList[0]||''); }, [staffList]);
 
-  const existing = useMemo(()=>{ const m={}; (data.dnevneKontrole||[]).forEach(k=>{ if(k && k.date===date && k.salonId===salon) m[k.paymentMethod]=k; }); return m; }, [data.dnevneKontrole, date, salon]);
-  useEffect(()=>{ const e={}; Object.values(existing).forEach(k=>{ e[k.paymentMethod]={actual:(k.actualAmount==null?'':k.actualAmount), source:k.sourceType||'CASH_ENVELOPE', status:k.status||'otvoreno', note:k.adminNote||''}; }); setEdits(e); }, [date, salon]);
+  const existing = useMemo(()=>{ const m={}; (data.dnevneKontrole||[]).forEach(k=>{ if(k && k.date===date && k.salonId===salon){ const ck = k.employeeName ? ('E|'+k.employeeName+'|'+k.paymentMethod) : ('S|'+k.paymentMethod); m[ck]=k; } }); return m; }, [data.dnevneKontrole, date, salon]);
+  useEffect(()=>{ const e={}; Object.entries(existing).forEach(([ck,k])=>{ e[ck]={actual:(k.actualAmount==null?'':k.actualAmount), source:k.sourceType||'CASH_ENVELOPE', status:k.status||'otvoreno', note:k.adminNote||''}; }); setEdits(e); }, [date, salon]);
 
-  const setE = (p,k,v)=> setEdits(c=>({...c,[p]:{...(c[p]||{source:'CASH_ENVELOPE',status:'otvoreno'}),[k]:v}}));
+  const setE = (ck,k,v)=> setEdits(c=>({...c,[ck]:{...(c[ck]||{source:'CASH_ENVELOPE',status:'otvoreno'}),[k]:v}}));
   const salonName = (salons.find(s=>s.id===salon)||{}).name || salon;
-  const sysTot = pays.reduce((s,p)=>s+byPay[p],0);
-  const anyActual = pays.some(p=>{ const a=(edits[p]||{}).actual; return !(a===''||a==null); });
-  const actTot = pays.reduce((s,p)=>{ const a=(edits[p]||{}).actual; return s+(a===''||a==null?0:Number(a)); },0);
 
   const saveCtrl = () => {
     if(!__db){ alert('Nema veze s bazom.'); return; }
     const upd={}; let n=0;
-    pays.forEach(p=>{
-      const c=edits[p]; if(!c) return;
+    Object.entries(edits).forEach(([ck,c])=>{
+      if(!c) return;
       const hasActual = !(c.actual===''||c.actual==null);
       const changed = hasActual || (c.status && c.status!=='otvoreno') || (c.note && c.note.trim());
       if(!changed) return;
-      const id='k_'+date+'_'+salon+'_'+kSafe(p);
+      const prev=existing[ck];
+      let scope,staffName=null,pay,sys;
+      if(ck.charAt(0)==='S'){ scope='S'; pay=ck.slice(2); sys=byPay[pay]; }
+      else { const parts=ck.split('|'); staffName=parts[1]; pay=parts.slice(2).join('|'); sys=(byStaffPay[staffName]||{})[pay]; }
+      if(sys==null) sys=(prev&&prev.systemAmount!=null)?prev.systemAmount:0;
       const act = hasActual ? Number(c.actual) : null;
-      const sys = byPay[p];
-      const prev = existing[p];
-      upd['dnevneKontrole/'+id] = { id, date, salonId:salon, employeeId:null, paymentMethod:p,
+      const id = scope==='S' ? ('k_'+date+'_'+salon+'_S_'+kSafe(pay)) : ('k_'+date+'_'+salon+'_E_'+kSafe(staffName)+'_'+kSafe(pay));
+      upd['dnevneKontrole/'+id] = { id, date, salonId:salon, employeeId:null, employeeName:staffName, paymentMethod:pay,
         systemAmount:sys, actualAmount:act, differenceAmount:(act==null?null:Number((act-sys).toFixed(2))),
         sourceType:c.source||'CASH_ENVELOPE', employeeNote:'', adminNote:(c.note||'').trim(),
         status:c.status||'otvoreno', enteredBy:'admin', verifiedBy:(c.status==='provjereno'?'admin':''),
         createdAt:(prev&&prev.createdAt)||new Date().toISOString(), updatedAt:new Date().toISOString() };
       const aid='a_'+uid();
       upd['audit/'+aid] = { id:aid, at:new Date().toISOString(), action:prev?'kontrola_izmjena':'kontrola_unos',
-        by:'admin', salonId:salon, date, paymentMethod:p,
+        by:'admin', salonId:salon, date, employeeName:staffName, paymentMethod:pay,
         oldValue: prev?{actual:prev.actualAmount,status:prev.status}:null, newValue:{actual:act,status:c.status||'otvoreno'} };
       n++;
     });
@@ -6677,16 +6680,45 @@ function Kontrola({ data, onRefresh }) {
       const actAll=dc.filter(k=>k.actualAmount!=null).reduce((s,k)=>s+Number(k.actualAmount),0);
       const st=dc.some(k=>k.status==='neslaganje')?'Neslaganje':(dc.length&&dc.every(k=>k.status==='provjereno')?'Provjereno':'Otvoreno');
       return {Datum:d,Salon:salonName,'Iznos aplikacija':Number(app.toFixed(2)),'Gotovina kuverta':bySrc('CASH_ENVELOPE')||'','Kartice POS':bySrc('POS_CLOSING')||'','Banka':bySrc('BANK_REPORT')||'','Ostalo':bySrc('OTHER')||'','Razlika':dc.length?Number((actAll-app).toFixed(2)):'',Status:st}; });
-    const l2=[]; dts.forEach(d=>{ const de=mE.filter(e=>e.date===d); const m={}; de.forEach(e=>{const s=e.staff||'?';m[s]=(m[s]||0)+Number(e.total||0);}); Object.keys(m).sort().forEach(s=>l2.push({Datum:d,Salon:salonName,Djelatnica:s,'Promet aplikacija':Number(m[s].toFixed(2)),'Kontrolni iznos':'',Razlika:'',Napomena:'',Status:''})); });
+    const l2=[]; dts.forEach(d=>{ const de=mE.filter(e=>e.date===d); const m={}; de.forEach(e=>{const s=e.staff||'?';const p=normPayment(e.payment)||e.payment||'?';(m[s]=m[s]||{});m[s][p]=(m[s][p]||0)+Number(e.total||0);});
+      Object.keys(m).sort().forEach(s=>{ const kc=mC.filter(k=>k.date===d&&k.employeeName===s); Object.keys(m[s]).sort().forEach(p=>{ const rec=kc.find(k=>k.paymentMethod===p); l2.push({Datum:d,Salon:salonName,Djelatnica:s,'Način plaćanja':p,'Promet aplikacija':Number(m[s][p].toFixed(2)),'Kontrolni iznos':rec&&rec.actualAmount!=null?rec.actualAmount:'','Razlika':rec&&rec.differenceAmount!=null?rec.differenceAmount:'',Status:rec?rec.status:'',Napomena:rec?rec.adminNote:''}); }); }); });
     const l3=mE.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).map(e=>({Datum:e.date,Djelatnica:e.staff||'',Usluga:e.service||'',Klijent:e.clientName||'','Način plaćanja':e.payment||'',Iznos:Number(Number(e.total||0).toFixed(2))}));
     const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(l1.length?l1:[{Datum:'',Salon:''}]),'Sažetak po danima');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(l1.length?l1:[{Datum:''}]),'Sažetak po danima');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(l2.length?l2:[{Datum:''}]),'Po djelatnicama');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(l3.length?l3:[{Datum:''}]),'Detaljne fakture');
     XLSX.writeFile(wb,`Hypnotic_kontrola_${salon}_${month}.xlsx`);
   };
 
   const cellB='1px solid var(--border)';
+  const CtrlTable=(pairs,ckFn)=>{
+    const tot=pairs.reduce((s,x)=>s+x.sys,0);
+    const anyA=pairs.some(x=>{const a=(edits[ckFn(x.pay)]||{}).actual;return !(a===''||a==null);});
+    const aTot=pairs.reduce((s,x)=>{const a=(edits[ckFn(x.pay)]||{}).actual;return s+(a===''||a==null?0:Number(a));},0);
+    return <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+      <thead><tr>{['Način plaćanja','Iznos iz aplikacije','Stvarni iznos','Razlika','Izvor','Status','Napomena'].map((h,i)=>(
+        <th key={h} style={{textAlign:(i>=1&&i<=3)?'right':'left',color:'var(--soft)',fontSize:11,textTransform:'uppercase',padding:8,borderBottom:'2px solid var(--border)'}}>{h}</th>))}</tr></thead>
+      <tbody>
+      {pairs.map(x=>{ const ck=ckFn(x.pay); const c=edits[ck]||{}; const act=(c.actual===''||c.actual==null)?null:Number(c.actual); const diff=act==null?null:act-x.sys; const stc=c.status||'otvoreno'; const pl=kPill(stc);
+        return <tr key={ck}>
+          <td style={{padding:8,borderBottom:cellB,fontWeight:700}}>{x.pay}</td>
+          <td style={{padding:8,borderBottom:cellB,textAlign:'right'}}>{fmt(x.sys)} €</td>
+          <td style={{padding:8,borderBottom:cellB,textAlign:'right'}}><input type="number" step="0.01" value={c.actual==null?'':c.actual} placeholder="—" onChange={e=>setE(ck,'actual',e.target.value)} style={{width:96,textAlign:'right',border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:13}}/></td>
+          <td style={{padding:8,borderBottom:cellB,textAlign:'right',color:(diff==null||diff===0)?'var(--soft)':(diff>0?'var(--green,#2E7D46)':'#C0392B'),fontWeight:diff?700:400}}>{diff==null?'—':(diff>0?'+':'')+fmt(diff)+' €'}</td>
+          <td style={{padding:8,borderBottom:cellB}}><select value={c.source||'CASH_ENVELOPE'} onChange={e=>setE(ck,'source',e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 7px',fontSize:12.5}}>{KONTROLA_SOURCES.map(s=><option key={s[0]} value={s[0]}>{s[1]}</option>)}</select></td>
+          <td style={{padding:8,borderBottom:cellB}}><select value={stc} onChange={e=>setE(ck,'status',e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 7px',fontSize:12.5,background:pl[0],color:pl[1],fontWeight:700}}>{KONTROLA_STATUS.map(s=><option key={s[0]} value={s[0]}>{s[1]}</option>)}</select></td>
+          <td style={{padding:8,borderBottom:cellB}}><input value={c.note||''} placeholder="napomena…" onChange={e=>setE(ck,'note',e.target.value)} style={{width:150,border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:13}}/></td>
+        </tr>;})}
+        <tr>
+          <td style={{padding:8,fontWeight:800,borderTop:'2px solid var(--border)'}}>UKUPNO</td>
+          <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)'}}>{fmt(tot)} €</td>
+          <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)'}}>{anyA?fmt(aTot)+' €':'—'}</td>
+          <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)',color:!anyA?'var(--soft)':((aTot-tot)>0?'var(--green,#2E7D46)':(aTot-tot)<0?'#C0392B':'var(--soft)')}}>{anyA?((aTot-tot)>0?'+':'')+fmt(aTot-tot)+' €':'—'}</td>
+          <td colSpan={3} style={{borderTop:'2px solid var(--border)'}}></td>
+        </tr>
+      </tbody></table></div>;
+  };
+
   return (
     <div>
       <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'12px 14px',marginBottom:14}}>
@@ -6700,58 +6732,39 @@ function Kontrola({ data, onRefresh }) {
         <button className="btn btn-sm" onClick={exportExcel} style={{background:'var(--gold,#B9975B)',color:'#fff',border:'none'}}>⬇ Excel izvoz</button>
       </div>
       <div style={{display:'flex',gap:6,marginBottom:14}}>
-        <button className={`btn btn-sm ${view==='A'?'btn-primary':'btn-outline'}`} onClick={()=>setView('A')}>Prikaz A — po načinu plaćanja</button>
-        <button className={`btn btn-sm ${view==='B'?'btn-primary':'btn-outline'}`} onClick={()=>setView('B')}>Prikaz B — po djelatnici</button>
+        <button className={`btn btn-sm ${view==='B'?'btn-primary':'btn-outline'}`} onClick={()=>setView('B')}>Po djelatnici</button>
+        <button className={`btn btn-sm ${view==='A'?'btn-primary':'btn-outline'}`} onClick={()=>setView('A')}>Ukupno po salonu</button>
       </div>
       {toast && <div style={{background:'var(--green-bg,#EAF5EC)',border:'1px solid #BFE0C7',color:'var(--green,#2E7D46)',borderRadius:9,padding:'8px 12px',marginBottom:12,fontWeight:700,fontSize:13}}>{toast}</div>}
 
-      {view==='A' && (
+      {view==='B' && (
         <div className="card">
-          <h3 style={{margin:'0 0 4px'}}>Kuverta / POS / banka — {salonName}, {fmtDate(date)}</h3>
-          <div style={{color:'var(--soft)',fontSize:12.5,marginBottom:12}}>„Iznos iz aplikacije" se čita iz prometa i ne mijenja se. Upiši stvarni kontrolni iznos; razlika i status spremaju se odvojeno — originalne fakture ostaju netaknute.</div>
-          {pays.length===0 ? <div style={{color:'var(--soft)',padding:'12px 0'}}>Nema prometa za odabrani dan i salon.</div> :
-          <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-            <thead><tr>{['Način plaćanja','Iznos iz aplikacije','Stvarni iznos','Razlika','Izvor','Status','Napomena'].map((h,i)=>(
-              <th key={h} style={{textAlign:(i>=1&&i<=3)?'right':'left',color:'var(--soft)',fontSize:11,textTransform:'uppercase',padding:8,borderBottom:'2px solid var(--border)'}}>{h}</th>))}</tr></thead>
-            <tbody>
-            {pays.map(p=>{ const c=edits[p]||{}; const act=(c.actual===''||c.actual==null)?null:Number(c.actual); const diff=act==null?null:act-byPay[p]; const stc=c.status||'otvoreno'; const pl=kPill(stc);
-              return <tr key={p}>
-                <td style={{padding:8,borderBottom:cellB,fontWeight:700}}>{p}</td>
-                <td style={{padding:8,borderBottom:cellB,textAlign:'right'}}>{fmt(byPay[p])} €</td>
-                <td style={{padding:8,borderBottom:cellB,textAlign:'right'}}><input type="number" step="0.01" value={c.actual==null?'':c.actual} placeholder="—" onChange={e=>setE(p,'actual',e.target.value)} style={{width:92,textAlign:'right',border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:13}}/></td>
-                <td style={{padding:8,borderBottom:cellB,textAlign:'right',color:(diff==null||diff===0)?'var(--soft)':(diff>0?'var(--green,#2E7D46)':'#C0392B'),fontWeight:diff?700:400}}>{diff==null?'—':(diff>0?'+':'')+fmt(diff)+' €'}</td>
-                <td style={{padding:8,borderBottom:cellB}}><select value={c.source||'CASH_ENVELOPE'} onChange={e=>setE(p,'source',e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 7px',fontSize:12.5}}>{KONTROLA_SOURCES.map(s=><option key={s[0]} value={s[0]}>{s[1]}</option>)}</select></td>
-                <td style={{padding:8,borderBottom:cellB}}><select value={stc} onChange={e=>setE(p,'status',e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 7px',fontSize:12.5,background:pl[0],color:pl[1],fontWeight:700}}>{KONTROLA_STATUS.map(s=><option key={s[0]} value={s[0]}>{s[1]}</option>)}</select></td>
-                <td style={{padding:8,borderBottom:cellB}}><input value={c.note||''} placeholder="napomena…" onChange={e=>setE(p,'note',e.target.value)} style={{width:150,border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:13}}/></td>
-              </tr>;})}
-              <tr>
-                <td style={{padding:8,fontWeight:800,borderTop:'2px solid var(--border)'}}>UKUPNO</td>
-                <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)'}}>{fmt(sysTot)} €</td>
-                <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)'}}>{anyActual?fmt(actTot)+' €':'—'}</td>
-                <td style={{padding:8,textAlign:'right',fontWeight:800,borderTop:'2px solid var(--border)',color:!anyActual?'var(--soft)':((actTot-sysTot)>0?'var(--green,#2E7D46)':(actTot-sysTot)<0?'#C0392B':'var(--soft)')}}>{anyActual?((actTot-sysTot)>0?'+':'')+fmt(actTot-sysTot)+' €':'—'}</td>
-                <td colSpan={3} style={{borderTop:'2px solid var(--border)'}}></td>
-              </tr>
-            </tbody></table></div>}
-          <div style={{marginTop:12,textAlign:'right'}}><button className="btn btn-primary" onClick={saveCtrl}>💾 Spremi kontrolu</button></div>
-          <div style={{fontSize:12,color:'#6b5320',background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',borderRadius:9,padding:'9px 12px',marginTop:12}}>💡 Zajednička kuverta vodi se na razini salon + datum i ne razdjeljuje se automatski po djelatnicama. Spremanje ide u nove čvorove /dnevneKontrole + /audit — promet i fakture se ne diraju.</div>
+          <h3 style={{margin:'0 0 4px'}}>Kontrola po djelatnici — {salonName}, {fmtDate(date)}</h3>
+          <div style={{color:'var(--soft)',fontSize:12.5,marginBottom:12}}>Odaberi djelatnicu → prikaže se <b>njezin</b> promet po načinu plaćanja („iznos iz aplikacije"). Upiši stvarni iznos; razlika i status spremaju se odvojeno — originalne fakture ostaju netaknute.</div>
+          {staffList.length===0 ? <div style={{color:'var(--soft)',padding:'12px 0'}}>Nema prometa za odabrani dan i salon.</div> : <>
+            <div style={{marginBottom:12,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+              <label style={{fontSize:12,color:'var(--soft)',fontWeight:700}}>Djelatnica</label>
+              <select value={selStaff} onChange={e=>setSelStaff(e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:7,padding:'6px 10px',fontSize:13,fontWeight:700}}>
+                {staffList.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+              <span style={{fontSize:12,color:'var(--soft)'}}>ukupno danas: <b>{fmt(Object.values(byStaffPay[selStaff]||{}).reduce((a,b)=>a+b,0))} €</b></span>
+            </div>
+            {CtrlTable(Object.keys(byStaffPay[selStaff]||{}).sort().map(p=>({pay:p,sys:byStaffPay[selStaff][p]})), p=>'E|'+selStaff+'|'+p)}
+            <div style={{marginTop:12,textAlign:'right'}}><button className="btn btn-primary" onClick={saveCtrl}>💾 Spremi kontrolu</button></div>
+            <div style={{fontSize:12,color:'#6b5320',background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',borderRadius:9,padding:'9px 12px',marginTop:12}}>💡 Unosiš ručno po djelatnici — kuverta se ne razdjeljuje automatski. Spremanje ide u nove čvorove /dnevneKontrole + /audit; promet i fakture se ne diraju.</div>
+          </>}
         </div>
       )}
 
-      {view==='B' && (
+      {view==='A' && (
         <div className="card">
-          <h3 style={{margin:'0 0 4px'}}>Analitika po djelatnici — {salonName}, {fmtDate(date)}</h3>
-          <div style={{color:'var(--soft)',fontSize:12.5,marginBottom:12}}>Promet po djelatnici iz aplikacije (informativno). Kontrolni iznos po djelatnici prikazuje se samo ako stvarno postoji.</div>
-          {Object.keys(byStaff).length===0 ? <div style={{color:'var(--soft)',padding:'12px 0'}}>Nema prometa za odabrani dan i salon.</div> :
-          <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
-            <thead><tr>{['Djelatnica','Promet iz aplikacije','Kontrolni iznos','Razlika','Status'].map((h,i)=><th key={h} style={{textAlign:(i>=1&&i<=3)?'right':'left',color:'var(--soft)',fontSize:11,textTransform:'uppercase',padding:8,borderBottom:'2px solid var(--border)'}}>{h}</th>)}</tr></thead>
-            <tbody>{Object.keys(byStaff).sort().map(s=>(<tr key={s}>
-              <td style={{padding:8,borderBottom:cellB,fontWeight:700}}>{s}</td>
-              <td style={{padding:8,borderBottom:cellB,textAlign:'right'}}>{fmt(byStaff[s])} €</td>
-              <td style={{padding:8,borderBottom:cellB,textAlign:'right',color:'var(--soft)'}}>—</td>
-              <td style={{padding:8,borderBottom:cellB,textAlign:'right',color:'var(--soft)'}}>—</td>
-              <td style={{padding:8,borderBottom:cellB}}><span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,background:'#EEE9DD',color:'#7A6A3E'}}>Otvoreno</span></td>
-            </tr>))}</tbody></table></div>}
-          <div style={{fontSize:12,color:'#6b5320',background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',borderRadius:9,padding:'9px 12px',marginTop:12}}>💡 Analitički prikaz. Stvarna kontrola (kuverta/POS) vodi se u Prikazu A na razini salona.</div>
+          <h3 style={{margin:'0 0 4px'}}>Ukupno po salonu — {salonName}, {fmtDate(date)}</h3>
+          <div style={{color:'var(--soft)',fontSize:12.5,marginBottom:12}}>Zbirni promet salona po načinu plaćanja (svih djelatnica zajedno). Za kontrolu ukupne kuverte/POS-a na razini salona.</div>
+          {pays.length===0 ? <div style={{color:'var(--soft)',padding:'12px 0'}}>Nema prometa za odabrani dan i salon.</div> : <>
+            {CtrlTable(pays.map(p=>({pay:p,sys:byPay[p]})), p=>'S|'+p)}
+            <div style={{marginTop:12,textAlign:'right'}}><button className="btn btn-primary" onClick={saveCtrl}>💾 Spremi kontrolu</button></div>
+            <div style={{fontSize:12,color:'#6b5320',background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',borderRadius:9,padding:'9px 12px',marginTop:12}}>💡 Ovo je kontrola na razini salon + datum. Spremanje ide u nove čvorove /dnevneKontrole + /audit; promet i fakture se ne diraju.</div>
+          </>}
         </div>
       )}
     </div>
