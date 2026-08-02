@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080201;
+const APP_VERSION = 2026080202;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -6848,6 +6848,138 @@ function Semafor({ data }) {
   );
 }
 
+// ─── ZADATAK B: Mjesečni obračun (bonus/isplate/provizije/team) — ADMIN ──────
+// Koristi ISTE formule kao Provjera. Dry-run prvo; "Knjiži" piše NOVE expense zapise
+// (targeted per-id) s poljima expensePeriod/expenseStatus/obracunKey. Postojeće se NE dira,
+// a već ručno knjiženi ("+ Trošak") se prepoznaju i preskaču (dedup).
+const OBR_OWNER='MAJA HAČIĆ';
+function obrCalcBonus(t){ if(t<=4000)return 0; const o=t-4000; return t<=5000?o*0.12:(t<=6500?o*0.15:o*0.18); }
+const OBR_PAKET=new Set(['PAKET-GOTOVINA -','PAKET-GOTOVINA +','PAKET-KARTICA','PAKET-GOTOVINA-','PAKET-GOTOVINA+']);
+const OBR_N=s=>String(s||'').replace(/\s+/g,' ').trim().toUpperCase();
+
+function computeObracun(data, month){
+  const bonusPayments=new Set(STAFF_PROMET);
+  const roleMap={}, homeMap={};
+  (data.staff||[]).forEach(s=>{ const n=OBR_N(s.name); roleMap[n]=(s.role||'djelatnica'); homeMap[n]=s.salonId; });
+  const promet={}, paket={}, salonOf={};
+  (data.entries||[]).forEach(e=>{
+    if(!e || String(e.date||'').slice(0,7)!==month) return;
+    const st=OBR_N(e.staff); if(!st) return;
+    const pay=normPayment(e.payment)||'';
+    if(bonusPayments.has(pay)) promet[st]=(promet[st]||0)+Number(e.total||0);
+    if(OBR_PAKET.has(OBR_N(e.payment))) paket[st]=(paket[st]||0)+Number(e.total||0);
+    if(!salonOf[st]) salonOf[st]=e.salon;
+  });
+  const items=[];
+  const push=(tip,st,salon,osnova,iznos,label)=>{ if(iznos>0.005) items.push({tip,staff:st,salon:salon||'',osnova:Math.round(osnova*100)/100,iznos:Math.round(iznos*100)/100,label}); };
+  Object.keys(promet).forEach(st=>{
+    if(st===OBR_OWNER) return;
+    const role=roleMap[st]||'djelatnica'; const salon=homeMap[st]||salonOf[st]||''; const pr=promet[st]||0; const pk=paket[st]||0;
+    if(role==='praktikantica') push('isplata',st,salon,pr,pr*0.15,'Isplata '+st);
+    else push('bonus',st,salon,pr,obrCalcBonus(pr),'Bonus '+st);
+    if(pr>4000 && pk>0) push('paketi',st,salon,pk,pk*0.15,'Provizija paketi '+st);
+  });
+  (data.salons||[]).forEach(sl=>{
+    const dj=Object.keys(promet).filter(st=>st!==OBR_OWNER && (roleMap[st]||'djelatnica')==='djelatnica' && (homeMap[st]||salonOf[st])===sl.id);
+    const goal=dj.reduce((s,st)=>s+(promet[st]||0),0);
+    const per=goal>=18000?300:(goal>=15000?150:0);
+    if(per>0) dj.forEach(st=>push('team',st,sl.id,goal,per,'Team bonus '+st));
+  });
+  return items;
+}
+function obrBooked(data, item, month){
+  const key=item.tip+'|'+item.staff+'|'+item.salon+'|'+month;
+  return (data.expenses||[]).some(x=>{
+    if(!x) return false;
+    if(x.obracunKey===key) return true;
+    const per=x.expensePeriod||String(x.date||'').slice(0,7);
+    if(per!==month) return false;
+    return String(x.subcategory||'').trim().toUpperCase()===item.label.trim().toUpperCase();
+  });
+}
+
+const OBR_TIP_LABEL={bonus:'Bonusi djelatnica',isplata:'Isplate praktikantica',paketi:'Provizije paketi',team:'Team bonus'};
+
+function Obracun({ data, onRefresh }){
+  const now=todayZagreb();
+  const prevMonth=(()=>{ const [y,m]=now.split('-').map(Number); const d=new Date(y,m-2,1); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); })();
+  const [month,setMonth]=useState(prevMonth);
+  const [toast,setToast]=useState('');
+  const items=useMemo(()=>computeObracun(data,month).map(it=>({...it,booked:obrBooked(data,it,month)})),[data,month]);
+  const novi=items.filter(it=>!it.booked);
+  const vec=items.filter(it=>it.booked);
+  const sumNovi=novi.reduce((s,it)=>s+it.iznos,0);
+  const sumAll=items.reduce((s,it)=>s+it.iznos,0);
+  const salonName=id=>(data.salons.find(s=>s.id===id)||{}).name||id;
+
+  const book=()=>{
+    if(!__db){ alert('Nema veze s bazom.'); return; }
+    if(!novi.length){ setToast('Nema novih za knjižiti — sve je već knjiženo.'); setTimeout(()=>setToast(''),3000); return; }
+    if(!confirm('Knjižiti '+novi.length+' novih obračuna za '+month+' (ukupno '+fmt(sumNovi)+' €)?\n\nStatus: „Obračunato — nije isplaćeno" (trošak pripada '+month+'; isplatu upišeš kad platiš).\nPostojeći promet i troškovi se NE diraju.')) return;
+    const [yy,mm]=month.split('-').map(Number); const lastDay=month+'-'+String(new Date(yy,mm,0).getDate()).padStart(2,'0');
+    const upd={};
+    novi.forEach(it=>{
+      const id='obr_'+month+'_'+it.tip+'_'+kSafe(it.staff);
+      upd['expenses/'+id]={ id, date:lastDay, salonId:it.salon, category:'ISPLATE', subcategory:it.label, amount:it.iznos, note:it.staff,
+        type:'varijabilni', dobavljac:'', createdAt:new Date().toISOString(),
+        expensePeriod:month, expenseStatus:'ACCRUED_UNPAID', paidAmount:0, paidDate:'', dueDate:'',
+        obracunKey:it.tip+'|'+it.staff+'|'+it.salon+'|'+month, autoSource:'obracun', osnovica:it.osnova };
+      const aid='a_'+uid();
+      upd['audit/'+aid]={ id:aid, at:new Date().toISOString(), action:'obracun_knjizenje', by:'admin', salonId:it.salon, period:month, tip:it.tip, staff:it.staff, iznos:it.iznos };
+    });
+    __db.ref(FB_PATH).update(upd).then(()=>{ setToast('Knjiženo '+novi.length+' obračuna ('+fmt(sumNovi)+' €). Provjeri u Troškovi/Financije.'); setTimeout(()=>setToast(''),5000); })
+      .catch(err=>alert('Greška: '+((err&&err.message)||err)));
+  };
+
+  const cellB='1px solid var(--border)';
+  const groups=['bonus','isplata','paketi','team'];
+  return (
+    <div>
+      <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap',background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'12px 16px',marginBottom:14}}>
+        <label style={{fontWeight:700,fontSize:13}}>Mjesec obračuna</label>
+        <input type="month" value={month} onChange={e=>setMonth(e.target.value)} style={{border:'1.5px solid var(--border)',borderRadius:7,padding:'6px 10px',fontSize:14}}/>
+        <div style={{flex:1}}></div>
+        <span style={{fontSize:13,color:'var(--soft)'}}>Novo: <b style={{color:'var(--ink)'}}>{novi.length}</b> ({fmt(sumNovi)} €) · Već knjiženo: <b style={{color:'var(--ink)'}}>{vec.length}</b></span>
+        <button className="btn btn-primary" onClick={book} disabled={!novi.length}>🧮 Knjiži {novi.length} novih</button>
+      </div>
+      {toast && <div style={{background:'var(--green-bg,#EAF5EC)',border:'1px solid #BFE0C7',color:'var(--green,#2E7D46)',borderRadius:9,padding:'9px 12px',marginBottom:12,fontWeight:700,fontSize:13}}>{toast}</div>}
+      <div style={{background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',color:'#6b5320',borderRadius:10,padding:'10px 13px',marginBottom:14,fontSize:12.5,lineHeight:1.5}}>
+        <b>Dry-run:</b> ispod je što bi se knjižilo. „VEĆ KNJIŽENO" = već postoji (ručni „+ Trošak" ili prijašnji obračun) → preskače se. Ništa se ne upisuje dok ne klikneš <b>Knjiži</b>. Vlasnica (Maja Hačić) se izuzima.
+      </div>
+
+      {items.length===0 ? <div className="card" style={{color:'var(--soft)'}}>Nema obračuna za {month} (nema prometa ili su svi ispod pragova).</div> :
+       groups.filter(g=>items.some(it=>it.tip===g)).map(g=>{
+        const rows=items.filter(it=>it.tip===g);
+        const gsum=rows.reduce((s,it)=>s+it.iznos,0);
+        return <div key={g} className="card" style={{marginBottom:12}}>
+          <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+            <div style={{fontWeight:800,fontSize:15}}>{OBR_TIP_LABEL[g]}</div>
+            <div style={{fontWeight:800,color:'var(--gold,#B9975B)'}}>{fmt(gsum)} €</div>
+          </div>
+          <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead><tr>{['Osoba','Salon','Osnova (promet)','Iznos','Status'].map((h,i)=><th key={h} style={{textAlign:(i===2||i===3)?'right':'left',color:'var(--soft)',fontSize:11,textTransform:'uppercase',padding:8,borderBottom:'2px solid var(--border)'}}>{h}</th>)}</tr></thead>
+            <tbody>
+            {rows.map((it,i)=>(<tr key={i}>
+              <td style={{padding:8,borderBottom:cellB,fontWeight:700}}>{it.staff}</td>
+              <td style={{padding:8,borderBottom:cellB}}>{salonName(it.salon)}</td>
+              <td style={{padding:8,borderBottom:cellB,textAlign:'right',color:'var(--soft)'}}>{fmt(it.osnova)} €</td>
+              <td style={{padding:8,borderBottom:cellB,textAlign:'right',fontWeight:800}}>{fmt(it.iznos)} €</td>
+              <td style={{padding:8,borderBottom:cellB}}>{it.booked
+                ? <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,background:'#EEE9DD',color:'#7A6A3E'}}>VEĆ KNJIŽENO</span>
+                : <span style={{fontSize:11,fontWeight:700,padding:'3px 9px',borderRadius:20,background:'var(--green-bg,#EAF5EC)',color:'var(--green,#2E7D46)'}}>NOVO</span>}</td>
+            </tr>))}
+            </tbody></table></div>
+        </div>;
+      })}
+
+      {items.length>0 && <div style={{background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'12px 16px',fontSize:13,display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+        <span>Ukupno obračun za <b>{month}</b>: <b>{fmt(sumAll)} €</b></span>
+        <span style={{color:'var(--green,#2E7D46)',fontWeight:700}}>Za knjižiti (novo): {fmt(sumNovi)} €</span>
+      </div>}
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -6990,7 +7122,7 @@ function App({ initialData }) {
   const salonLabel = salonId==='all'?'Administrator — Svi saloni':(salon?.name||'Salon');
 
   const tabs = salonId==='all'
-    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
+    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['obracun','🧮 Obračun'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
     : [['unos','➕ Novi unos'],['pregled','📋 Pregled'],['provjera','💵 Provjera'],['klijentice','👥 Klijentice'],['postavke','⚙️ Postavke']];
 
   return (
@@ -7058,6 +7190,7 @@ function App({ initialData }) {
         {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
         {tab==='kontrola'    && <Kontrola    data={data} onRefresh={refresh}/>}
         {tab==='semafor'     && <Semafor     data={data}/>}
+        {tab==='obracun'     && <Obracun     data={data} onRefresh={refresh}/>}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
