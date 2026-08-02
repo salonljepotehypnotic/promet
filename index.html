@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026073106;
+const APP_VERSION = 2026080201;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -240,7 +240,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[] };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{} };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -291,6 +291,7 @@ function mergeWithFirebase(fbData) {
     staffPins:       fbData.staffPins || {},
     dnevneKontrole:  fbObjToArr(fbData.dnevneKontrole),
     audit:           fbObjToArr(fbData.audit),
+    semaforConfig:   fbData.semaforConfig || {},
   };
 }
 
@@ -6771,6 +6772,82 @@ function Kontrola({ data, onRefresh }) {
   );
 }
 
+// ─── Semafor profitabilnosti (ADMIN, read-only nad prometom/troškovima) ──────
+// Neto = Prihod − Troškovi (iz app) − "dodatne plaće" (fiksne plaće koje nisu u troškovima).
+// Jedino što se upisuje je konfiguracija u NOVI čvor /semaforConfig. Promet/troškovi se NE diraju.
+const SEMAFOR_DEFAULT_PLACE = 8000; // 5 zaposlenih (~9.830) + doprinosi vlasnica − ono već zabilježeno u app
+const SEMAFOR_EXCL = new Set(['IZ PAKETA','POKLON BON-ODRAĐENO']); // isporuke, ne prihod
+function semNormPay(s){ return String(s||'').replace(/\s+/g,' ').trim().toUpperCase(); }
+function Semafor({ data }) {
+  const cfg = data.semaforConfig || {};
+  const [dodatne, setDodatne] = useState(()=> cfg.dodatnePlace!=null ? cfg.dodatnePlace : SEMAFOR_DEFAULT_PLACE);
+  const [toast, setToast] = useState('');
+  useEffect(()=>{ if(cfg.dodatnePlace!=null) setDodatne(cfg.dodatnePlace); }, [cfg.dodatnePlace]);
+
+  const rows = useMemo(()=>{
+    const rev={}, cost={};
+    (data.entries||[]).forEach(e=>{ if(!e)return; const m=String(e.date||'').slice(0,7); if(m.length!==7)return; if(SEMAFOR_EXCL.has(semNormPay(e.payment)))return; rev[m]=(rev[m]||0)+Number(e.total||0); });
+    (data.expenses||[]).forEach(x=>{ if(!x)return; let m=String(x.date||'').slice(0,7); if(m.length!==7) m=String(x.createdAt||'').slice(0,7); if(m.length!==7)return; cost[m]=(cost[m]||0)+Number(x.amount||0); });
+    const months=[...new Set([...Object.keys(rev),...Object.keys(cost)])].filter(m=>m>='2026-01').sort().slice(-6);
+    const dd=Number(dodatne)||0;
+    return months.map(m=>{
+      const r=rev[m]||0, c=(cost[m]||0)+dd, net=r-c, marg=r?net/r*100:0;
+      const headroom = r*0.85 - c; // koliko još BONUSA stane da marža ostane ≥15%
+      return {m,r,appCost:cost[m]||0,dd,c,net,marg,headroom};
+    });
+  }, [data.entries, data.expenses, dodatne]);
+
+  const MN=['','Sij','Velj','Ožu','Tra','Svi','Lip','Srp','Kol','Ruj','Lis','Stu','Pro'];
+  const moName=m=>{ const [y,mm]=m.split('-'); return MN[parseInt(mm)]+' '+y; };
+  const light=(net,marg)=> net<0?'🔴':(marg<15?'🟡':'🟢');
+  const col=(net,marg)=> net<0?'#C0392B':(marg<15?'#B8860B':'var(--green,#2E7D46)');
+
+  const saveCfg=()=>{
+    if(!__db){ alert('Nema veze s bazom.'); return; }
+    __db.ref(FB_PATH+'/semaforConfig').set({dodatnePlace:Number(dodatne)||0, updatedAt:new Date().toISOString()})
+      .then(()=>{ setToast('Spremljeno.'); setTimeout(()=>setToast(''),2500); })
+      .catch(err=>alert('Greška: '+((err&&err.message)||err)));
+  };
+
+  const last=rows[rows.length-1];
+  return (
+    <div>
+      <div style={{background:'#FBF3E2',border:'1px solid #EBD9AE',color:'#6b5320',borderRadius:12,padding:'12px 14px',marginBottom:14,fontSize:13,lineHeight:1.5}}>
+        ⚠️ „Neto" = Prihod − Troškovi (iz app) − <b>fiksne plaće koje NISU u troškovima</b>. Fiksne plaće (5 × ~1.966 € + vaši doprinosi) uglavnom nisu upisane kao trošak, pa ih ovdje uračunavam. „Neto" je zapravo <b>ono što ostaje tebi i Marini</b>.
+      </div>
+      <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap',background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'12px 16px',marginBottom:16}}>
+        <label style={{fontWeight:700,fontSize:13}}>Fiksne plaće koje nisu u troškovima (mj.)</label>
+        <input type="number" step="100" value={dodatne} onChange={e=>setDodatne(e.target.value)} style={{width:130,textAlign:'right',fontWeight:700,border:'1.5px solid var(--border)',borderRadius:8,padding:'7px 10px',fontSize:15}}/>
+        <span style={{fontWeight:700}}>€</span>
+        <button className="btn btn-sm btn-primary" onClick={saveCfg}>Spremi</button>
+        {toast && <span style={{color:'var(--green,#2E7D46)',fontWeight:700,fontSize:13}}>{toast}</span>}
+        <span style={{color:'var(--soft)',fontSize:12}}>procjena: 5 × ~1.966 € + doprinosi − već upisano</span>
+      </div>
+
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:12,marginBottom:16}}>
+        {rows.map(r=>(
+          <div key={r.m} className="card" style={{padding:16,borderColor:r.net<0?'#F0C7C1':(r.marg<15?'#EBD9AE':'#BFE0C7')}}>
+            <div style={{fontSize:12,color:'var(--soft)',fontWeight:700,textTransform:'uppercase'}}>{moName(r.m)}</div>
+            <div style={{fontSize:32,lineHeight:1,margin:'6px 0 2px'}}>{light(r.net,r.marg)}</div>
+            <div style={{fontSize:23,fontWeight:800,color:col(r.net,r.marg)}}>{fmt(r.net)} €</div>
+            <div style={{fontSize:13,fontWeight:700,color:col(r.net,r.marg),marginBottom:10}}>marža {r.marg.toFixed(0)}%</div>
+            <div style={{fontSize:12.5,color:'var(--soft)',display:'flex',justifyContent:'space-between',padding:'2px 0'}}>Prihod <b style={{color:'var(--ink)'}}>{fmt(r.r)} €</b></div>
+            <div style={{fontSize:12.5,color:'var(--soft)',display:'flex',justifyContent:'space-between',padding:'2px 0'}}>Troškovi (app) <b style={{color:'var(--ink)'}}>{fmt(r.appCost)} €</b></div>
+            <div style={{fontSize:12.5,color:'var(--soft)',display:'flex',justifyContent:'space-between',padding:'2px 0'}}>+ Plaće <b style={{color:'var(--ink)'}}>{fmt(r.dd)} €</b></div>
+            {r.headroom>0 && <div style={{marginTop:6,fontSize:11.5,color:'var(--green,#2E7D46)',fontWeight:700}}>još ~{fmt(r.headroom)} € prostora za bonuse</div>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:'14px 16px',fontSize:13,lineHeight:1.6}}>
+        <b>🟢</b> marža ≥ 15% (zdrav plus) &nbsp; <b>🟡</b> 0–15% (tanko) &nbsp; <b>🔴</b> gubitak (nema ni za vlasnice)
+        {last && last.headroom>0 && <div style={{marginTop:8,color:'var(--soft)'}}>Ovaj mjesec ({moName(last.m)}) možeš podijeliti još <b style={{color:'var(--green,#2E7D46)'}}>~{fmt(last.headroom)} €</b> u bonusima, a da ostaneš u zelenom (marža ≥ 15%).</div>}
+        <div style={{marginTop:8,color:'var(--soft)'}}>Kad počneš upisivati pune plaće u Troškove, smanji gornje polje da se ne broji dvaput.</div>
+      </div>
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -6913,7 +6990,7 @@ function App({ initialData }) {
   const salonLabel = salonId==='all'?'Administrator — Svi saloni':(salon?.name||'Salon');
 
   const tabs = salonId==='all'
-    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
+    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
     : [['unos','➕ Novi unos'],['pregled','📋 Pregled'],['provjera','💵 Provjera'],['klijentice','👥 Klijentice'],['postavke','⚙️ Postavke']];
 
   return (
@@ -6980,6 +7057,7 @@ function App({ initialData }) {
         {tab==='troskovi'    && <Troskovi    data={data} salonId={salonId} onRefresh={refresh}/>}
         {tab==='provjera'    && <Provjera    data={data} salonId={salonId} saveData={saveData} onRefresh={refresh}/>}
         {tab==='kontrola'    && <Kontrola    data={data} onRefresh={refresh}/>}
+        {tab==='semafor'     && <Semafor     data={data}/>}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
