@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080203;
+const APP_VERSION = 2026080204;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -6865,7 +6865,7 @@ function Semafor({ data }) {
 // Koristi ISTE formule kao Provjera. Dry-run prvo; "Knjiži" piše NOVE expense zapise
 // (targeted per-id) s poljima expensePeriod/expenseStatus/obracunKey. Postojeće se NE dira,
 // a već ručno knjiženi ("+ Trošak") se prepoznaju i preskaču (dedup).
-const OBR_OWNER='MAJA HAČIĆ';
+const OBR_OWNERS=['MAJA HAČIĆ','MARINA IVOŠ']; // vlasnice — ne primaju bonus/team niti se broje u cilj
 function obrCalcBonus(t){ if(t<=4000)return 0; const o=t-4000; return t<=5000?o*0.12:(t<=6500?o*0.15:o*0.18); }
 const OBR_PAKET=new Set(['PAKET-GOTOVINA -','PAKET-GOTOVINA +','PAKET-KARTICA','PAKET-GOTOVINA-','PAKET-GOTOVINA+']);
 const OBR_N=s=>String(s||'').replace(/\s+/g,' ').trim().toUpperCase();
@@ -6886,14 +6886,14 @@ function computeObracun(data, month){
   const items=[];
   const push=(tip,st,salon,osnova,iznos,label)=>{ if(iznos>0.005) items.push({tip,staff:st,salon:salon||'',osnova:Math.round(osnova*100)/100,iznos:Math.round(iznos*100)/100,label}); };
   Object.keys(promet).forEach(st=>{
-    if(st===OBR_OWNER) return;
+    if(OBR_OWNERS.includes(st)) return;
     const role=roleMap[st]||'djelatnica'; const salon=homeMap[st]||salonOf[st]||''; const pr=promet[st]||0; const pk=paket[st]||0;
     if(role==='praktikantica') push('isplata',st,salon,pr,pr*0.15,'Isplata '+st);
     else push('bonus',st,salon,pr,obrCalcBonus(pr),'Bonus '+st);
     if(pr>4000 && pk>0) push('paketi',st,salon,pk,pk*0.15,'Provizija paketi '+st);
   });
   (data.salons||[]).forEach(sl=>{
-    const dj=Object.keys(promet).filter(st=>st!==OBR_OWNER && (roleMap[st]||'djelatnica')==='djelatnica' && (homeMap[st]||salonOf[st])===sl.id);
+    const dj=Object.keys(promet).filter(st=>!OBR_OWNERS.includes(st) && (roleMap[st]||'djelatnica')==='djelatnica' && (homeMap[st]||salonOf[st])===sl.id);
     const goal=dj.reduce((s,st)=>s+(promet[st]||0),0);
     const per=goal>=18000?300:(goal>=15000?150:0);
     if(per>0) dj.forEach(st=>push('team',st,sl.id,goal,per,'Team bonus '+st));
