@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080204;
+const APP_VERSION = 2026080205;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -6993,6 +6993,57 @@ function Obracun({ data, onRefresh }){
   );
 }
 
+// ─── Promjena admin lozinke (ADMIN) ─────────────────────────────────────────
+// Mijenja lozinku zajedničkog računa baze: reauth starom → updatePassword novom.
+// Ništa se ne piše u /hypnotic; mijenja se samo Firebase Auth lozinka.
+const LOZINKA_EMAIL = 'salonljepotehypnotic@gmail.com';
+function PromjenaLozinke() {
+  const [stara, setStara] = useState('');
+  const [nova, setNova]   = useState('');
+  const [nova2, setNova2] = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [msg, setMsg]     = useState(null); // {ok:boolean, text}
+  const lbl = {fontSize:12,fontWeight:700,color:'var(--soft)',display:'block',margin:'12px 0 4px'};
+  const inp = {width:'100%',border:'1.5px solid var(--border)',borderRadius:8,padding:'9px 11px',fontSize:15};
+
+  const promijeni = () => {
+    setMsg(null);
+    if(!stara || !nova){ setMsg({ok:false,text:'Upiši staru i novu lozinku.'}); return; }
+    if(nova.length < 6){ setMsg({ok:false,text:'Nova lozinka mora imati barem 6 znakova.'}); return; }
+    if(nova !== nova2){ setMsg({ok:false,text:'Nova lozinka i ponovljena se ne slažu.'}); return; }
+    if(!window.firebase || !firebase.auth){ setMsg({ok:false,text:'Baza nije učitana. Osvježi stranicu.'}); return; }
+    setBusy(true);
+    firebase.auth().signInWithEmailAndPassword(LOZINKA_EMAIL, stara)
+      .then(()=> firebase.auth().currentUser.updatePassword(nova))
+      .then(()=>{ setBusy(false); setStara('');setNova('');setNova2('');
+        setMsg({ok:true,text:'✅ Lozinka je promijenjena! Ovo računalo ostaje prijavljeno. Sada na SVAKOM drugom računalu (Savska, Dobojska) — aplikacija će ih uskoro sama izbaciti na prijavu — upišite NOVU lozinku. Zapiši novu lozinku na sigurno.'}); })
+      .catch(err=>{ setBusy(false); const c=((err&&(err.code||err.message))||'').toString().toLowerCase();
+        if(c.includes('wrong-password')||c.includes('invalid-cred')||c.includes('invalid-login')) setMsg({ok:false,text:'❌ Stara lozinka nije točna.'});
+        else if(c.includes('weak-password')) setMsg({ok:false,text:'❌ Nova lozinka je preslaba (min 6 znakova).'});
+        else if(c.includes('too-many-requests')) setMsg({ok:false,text:'❌ Previše pokušaja. Pričekaj par minuta pa ponovno.'});
+        else setMsg({ok:false,text:'❌ Greška: '+c}); });
+  };
+
+  return (
+    <div style={{maxWidth:470}}>
+      <div className="card">
+        <h3 style={{marginTop:0,marginBottom:4}}>🔑 Promjena admin lozinke</h3>
+        <div style={{color:'var(--soft)',fontSize:13,marginBottom:6,lineHeight:1.5}}>Mijenja zajedničku lozinku baze. Nakon promjene, sva se računala trebaju <b>jednom</b> prijaviti novom lozinkom — aplikacija ih sama zatraži (samo-liječenje), nema gubljenja podataka.</div>
+        <div style={{background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',color:'#6b5320',borderRadius:9,padding:'9px 12px',fontSize:12.5,marginBottom:6}}>⚠️ Prije promjene: budi sigurna da znaš <b>staru</b> lozinku i da si <b>novu</b> zapisala na sigurno. Novu ćeš morati upisati na sva 3 računala.</div>
+        <label style={lbl}>Stara lozinka</label>
+        <input type="password" autoComplete="off" value={stara} onChange={e=>setStara(e.target.value)} style={inp}/>
+        <label style={lbl}>Nova lozinka (min 6 znakova)</label>
+        <input type="password" autoComplete="new-password" value={nova} onChange={e=>setNova(e.target.value)} style={inp}/>
+        <label style={lbl}>Ponovi novu lozinku</label>
+        <input type="password" autoComplete="new-password" value={nova2} onChange={e=>setNova2(e.target.value)} style={inp}/>
+        <button className="btn btn-primary" onClick={promijeni} disabled={busy} style={{marginTop:16,width:'100%'}}>{busy?'Mijenjam…':'Promijeni lozinku'}</button>
+        {msg && <div style={{marginTop:12,padding:'10px 13px',borderRadius:9,fontSize:13,fontWeight:600,lineHeight:1.5,
+          background:msg.ok?'var(--green-bg,#EAF5EC)':'#FBECEA',color:msg.ok?'var(--green,#2E7D46)':'#C0392B',border:'1px solid '+(msg.ok?'#BFE0C7':'#F0C7C1')}}>{msg.text}</div>}
+      </div>
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -7135,7 +7186,7 @@ function App({ initialData }) {
   const salonLabel = salonId==='all'?'Administrator — Svi saloni':(salon?.name||'Salon');
 
   const tabs = salonId==='all'
-    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['obracun','🧮 Obračun'],['alati','🔧 Alati'],['postavke','⚙️ Postavke']]
+    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['obracun','🧮 Obračun'],['alati','🔧 Alati'],['postavke','⚙️ Postavke'],['lozinka','🔑 Lozinka']]
     : [['unos','➕ Novi unos'],['pregled','📋 Pregled'],['provjera','💵 Provjera'],['klijentice','👥 Klijentice'],['postavke','⚙️ Postavke']];
 
   return (
@@ -7204,6 +7255,7 @@ function App({ initialData }) {
         {tab==='kontrola'    && <Kontrola    data={data} onRefresh={refresh}/>}
         {tab==='semafor'     && <Semafor     data={data}/>}
         {tab==='obracun'     && <Obracun     data={data} onRefresh={refresh}/>}
+        {tab==='lozinka'     && <PromjenaLozinke />}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}
       </div>
