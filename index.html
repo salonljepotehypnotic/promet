@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080205;
+const APP_VERSION = 2026080206;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -240,7 +240,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{} };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{}, adminGate:{} };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -292,6 +292,7 @@ function mergeWithFirebase(fbData) {
     dnevneKontrole:  fbObjToArr(fbData.dnevneKontrole),
     audit:           fbObjToArr(fbData.audit),
     semaforConfig:   fbData.semaforConfig || {},
+    adminGate:       fbData.adminGate || {},
   };
 }
 
@@ -7044,6 +7045,60 @@ function PromjenaLozinke() {
   );
 }
 
+// ─── Admin kod (zasebna brava za Administrator pogled) ───────────────────────
+// Frontend brava: skriva admin pogled (financije/semafor/obračun) od cura koje ne znaju kod.
+// Kod se sprema HASHIRAN u NOVI čvor /adminGate. NIJE neprobojni sef (podaci su u zajedničkoj
+// bazi), ali praktično sprječava da staff vidi brojke u aplikaciji.
+function adminHash(s){ s=String(s||''); let h=5381; for(let i=0;i<s.length;i++){ h=(((h<<5)+h)+s.charCodeAt(i))>>>0; } return 'g'+h.toString(36); }
+
+function AdminGate({ data, onUnlock, onLogout }){
+  const existing = (data.adminGate||{}).hash;
+  const setup = !existing;
+  const [code, setCode]   = useState('');
+  const [code2, setCode2] = useState('');
+  const [err, setErr]     = useState('');
+  const [busy, setBusy]   = useState(false);
+  const inp = {width:'100%',border:'1.5px solid var(--border)',borderRadius:8,padding:'11px 12px',fontSize:16,textAlign:'center',letterSpacing:'0.15em',marginTop:8};
+
+  const submit = () => {
+    setErr('');
+    if(setup){
+      if((code||'').length<4){ setErr('Kod mora imati barem 4 znaka.'); return; }
+      if(code!==code2){ setErr('Kodovi se ne slažu.'); return; }
+      if(!__db){ setErr('Baza nije spremna, osvježi stranicu.'); return; }
+      setBusy(true);
+      __db.ref(FB_PATH+'/adminGate').set({hash:adminHash(code), updatedAt:new Date().toISOString()})
+        .then(()=>{ setBusy(false); onUnlock(); })
+        .catch(e=>{ setBusy(false); setErr('Greška: '+((e&&e.message)||e)); });
+    } else {
+      if(adminHash(code)===existing){ onUnlock(); }
+      else { setErr('Pogrešan admin kod.'); setCode(''); }
+    }
+  };
+  const onKey = e => { if(e.key==='Enter') submit(); };
+
+  return (
+    <div className="login-screen">
+      <div className="login-card" style={{maxWidth:380}}>
+        <div className="login-logo">🔒</div>
+        <div className="login-title">Administrator</div>
+        <div className="login-sub">{setup ? 'Postavi admin kod (samo za tebe)' : 'Unesi admin kod'}</div>
+
+        {setup && <div style={{background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',color:'#6b5320',borderRadius:9,padding:'10px 12px',fontSize:12.5,lineHeight:1.5,margin:'6px 0 4px'}}>
+          Ovo je <b>zaseban kod samo za tebe</b> — cure ga ne znaju, pa ne mogu u financije. Zapiši ga na sigurno. <i>(Ako si ga već postavila, pričekaj koju sekundu da se učita pa osvježi.)</i>
+        </div>}
+
+        <input type="password" autoComplete="off" value={code} onChange={e=>setCode(e.target.value)} onKeyDown={onKey} placeholder="admin kod" style={inp} autoFocus/>
+        {setup && <input type="password" autoComplete="off" value={code2} onChange={e=>setCode2(e.target.value)} onKeyDown={onKey} placeholder="ponovi kod" style={inp}/>}
+        {err && <div style={{color:'#C0392B',fontWeight:700,fontSize:13,marginTop:10}}>{err}</div>}
+
+        <button className="btn btn-primary" onClick={submit} disabled={busy} style={{width:'100%',marginTop:16}}>{busy?'Spremam…':(setup?'Postavi i uđi':'Uđi')}</button>
+        <button className="btn btn-outline btn-sm" onClick={onLogout} style={{width:'100%',marginTop:8}}>← Natrag / odjava</button>
+      </div>
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -7058,7 +7113,8 @@ function App({ initialData }) {
     catch(e){ return 'unos'; }
   });
   const refresh = useCallback(d=>setData(d),[]);
-  const logout  = () => { sessionStorage.removeItem('hypnotic_session'); setSalonId(null); };
+  const [adminUnlocked, setAdminUnlocked] = useState(()=>{ try{ return sessionStorage.getItem('hyp_admin_unlock')==='1'; }catch(e){ return false; } });
+  const logout  = () => { try{sessionStorage.removeItem('hypnotic_session'); sessionStorage.removeItem('hyp_admin_unlock');}catch(e){} setAdminUnlocked(false); setSalonId(null); };
   // Prati je li uređaj stvarno prijavljen u (zaključanu) bazu — inače spremanje ne radi.
   const [dbAuthed, setDbAuthed] = useState(null); // null=nepoznato, true=prijavljen, false=NIJE
   useEffect(() => {
@@ -7179,6 +7235,10 @@ function App({ initialData }) {
   // prikaži login da se ponovno prijavi lozinkom — nema više rada "mimo baze" (tiho gubljenje).
   if (salonId && dbAuthed===false && window.firebase && firebase.auth) {
     return <LoginScreen data={data} reauth onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
+  }
+
+  if (salonId==='all' && !adminUnlocked) {
+    return <AdminGate data={data} onUnlock={()=>{ setAdminUnlocked(true); try{sessionStorage.setItem('hyp_admin_unlock','1');}catch(e){} }} onLogout={logout}/>;
   }
 
   const salon = data.salons.find(s=>s.id===salonId);
