@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080208;
+const APP_VERSION = 2026080209;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -7116,7 +7116,7 @@ function App({ initialData }) {
   });
   const refresh = useCallback(d=>setData(d),[]);
   const [adminUnlocked, setAdminUnlocked] = useState(()=>{ try{ return sessionStorage.getItem('hyp_admin_unlock')==='1'; }catch(e){ return false; } });
-  const logout  = () => { try{sessionStorage.removeItem('hypnotic_session'); sessionStorage.removeItem('hyp_admin_unlock');}catch(e){} setAdminUnlocked(false); setSalonId(null); };
+  const logout  = () => { try{sessionStorage.removeItem('hypnotic_session'); sessionStorage.removeItem('hyp_admin_unlock'); sessionStorage.removeItem('hypnotic_active_staff');}catch(e){} setAdminUnlocked(false); setSalonId(null); };
   // Prati je li uređaj stvarno prijavljen u (zaključanu) bazu — inače spremanje ne radi.
   const [dbAuthed, setDbAuthed] = useState(null); // null=nepoznato, true=prijavljen, false=NIJE
   useEffect(() => {
@@ -7225,11 +7225,13 @@ function App({ initialData }) {
     return () => ref.off('value', handler);
   }, []);
 
-  if (!salonId) return <LoginScreen data={data} onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
+  // Pri svakoj prijavi zaboravi zadnju djelatnicu → uvijek se ponovno prikaže popis "Tko unosi?"
+  const afterLogin = id => { setActive(''); setSalonId(id); setTab(id==='all'?'financije':'unos'); };
+  if (!salonId) return <LoginScreen data={data} onLogin={afterLogin}/>;
   // TRAŽI PRIJAVU U BAZU: ako uređaj ima sesiju ali NIJE prijavljen u Firebase (dbAuthed===false),
   // prikaži login da se ponovno prijavi lozinkom — nema više rada "mimo baze" (tiho gubljenje).
   if (salonId && dbAuthed===false && window.firebase && firebase.auth) {
-    return <LoginScreen data={data} reauth onLogin={id=>{setSalonId(id);setTab(id==='all'?'financije':'unos');}}/>;
+    return <LoginScreen data={data} reauth onLogin={afterLogin}/>;
   }
 
   if (salonId==='all' && !adminUnlocked) {
