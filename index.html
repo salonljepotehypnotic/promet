@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080209;
+const APP_VERSION = 2026080601;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -240,7 +240,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{}, adminGate:{} };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{}, adminGate:{}, importJobs:[], importProfiles:{} };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -293,6 +293,8 @@ function mergeWithFirebase(fbData) {
     audit:           fbObjToArr(fbData.audit),
     semaforConfig:   fbData.semaforConfig || {},
     adminGate:       fbData.adminGate || {},
+    importJobs:      fbObjToArr(fbData.importJobs),
+    importProfiles:  fbData.importProfiles || {},
   };
 }
 
@@ -7101,6 +7103,319 @@ function AdminGate({ data, onUnlock, onLogout }){
   );
 }
 
+// ─── UVOZ KLIJENTICA (Zoyya) — ADMIN ────────────────────────────────────────
+// Neutralni import sloj: adapter pretvara izvor (datoteka danas, API sutra) u ISTI interni
+// oblik klijentice. UI i baza ne znaju odakle podatak dolazi.
+// Zoyya je izvor istine za: zoyyaId, ime, telefon, e-mail, status, datumi.
+// Interna polja (notes, tags, dolazak, status, preporuke…) se NIKAD ne diraju uvozom.
+// Prazna vrijednost iz datoteke NE prepisuje postojeću. Nema automatskog brisanja.
+
+const UV_FIELDS = [
+  ['zoyyaId',      'Zoyya ID'],
+  ['fullName',     'Ime i prezime (jedno polje)'],
+  ['firstName',    'Ime'],
+  ['lastName',     'Prezime'],
+  ['phone',        'Telefon'],
+  ['email',        'E-mail'],
+  ['zoyyaStatus',  'Status u Zoyyi'],
+  ['zoyyaCreatedAt','Datum kreiranja'],
+  ['lastVisitAt',  'Zadnji dolazak'],
+  ['salonRaw',     'Salon / lokacija'],
+];
+const UV_HINTS = {
+  zoyyaId:/(zoyya).*(id)|^id$|^client.?id$|šifra|sifra/i,
+  fullName:/ime i prezime|puno ime|full ?name|^klijent(ica)?$|^naziv$|^customer$/i,
+  firstName:/^ime$|first.?name|^forename$/i,
+  lastName:/prezime|last.?name|surname/i,
+  phone:/tel|mob|phone|broj tel|kontakt/i,
+  email:/mail|e-?po[sš]ta/i,
+  zoyyaStatus:/status/i,
+  zoyyaCreatedAt:/kreiran|created|registr|datum unosa/i,
+  lastVisitAt:/zadnj|posljednj|last.?visit|posjet|dolazak/i,
+  salonRaw:/salon|lokacij|location|poslovnic|podru[zž]nic/i,
+};
+const uvTrim = v => String(v==null?'':v).replace(/\s+/g,' ').trim();
+const uvEmail = v => { const s=uvTrim(v).toLowerCase(); return /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(s)?s:''; };
+const uvPhoneN = v => { try { return normPhone(v)||''; } catch(e){ return ''; } };
+async function uvHash(buf){
+  try { const h=await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,32); }
+  catch(e){ return 'nohash-'+(buf.byteLength||0); }
+}
+
+// ── ADAPTER: datoteka → interni oblik (isti oblik vraćat će i budući API adapter) ──
+function ZoyyaFileImportAdapter(rows, map){
+  const g = (r,f) => map[f] ? uvTrim(r[map[f]]) : '';
+  return rows.map((r,i)=>{
+    let name = g(r,'fullName');
+    if(!name){ const fn=g(r,'firstName'), ln=g(r,'lastName'); name = uvTrim(fn+' '+ln); }
+    const phoneRaw=g(r,'phone'), emailRaw=g(r,'email');
+    return { _row:i+2, zoyyaId:g(r,'zoyyaId'), name,
+      phone:uvPhoneN(phoneRaw), phoneRaw, email:uvEmail(emailRaw), emailRaw,
+      zoyyaStatus:g(r,'zoyyaStatus'), zoyyaCreatedAt:g(r,'zoyyaCreatedAt'),
+      lastVisitAt:g(r,'lastVisitAt'), salonRaw:g(r,'salonRaw') };
+  });
+}
+// ── ADAPTER (stub): budući Zoyya API — isti izlazni oblik, isti pipeline ──
+// TODO_ZOYYA_API_DOCUMENTATION: endpointi, autentikacija, pagination, nazivi polja.
+const ZoyyaApiAdapter = {
+  available:false,
+  async fetch_clients(/*updated_since*/){ throw new Error('TODO_ZOYYA_API_DOCUMENTATION'); },
+  async fetch_client_by_id(/*zoyyaClientId*/){ throw new Error('TODO_ZOYYA_API_DOCUMENTATION'); },
+  normalize_client(raw){ return raw; },        // vraća isti interni oblik kao file adapter
+  sync_status(){ return 'NOT_CONFIGURED'; },
+  last_sync_at(){ return null; },
+};
+
+// ── Podudaranje: zoyyaId → telefon → e-mail; ime NIKAD automatski ──
+function uvMatch(rec, idx){
+  const byZ = rec.zoyyaId ? idx.z[rec.zoyyaId] : null;
+  if(byZ) return {client:byZ, how:'zoyyaId', safe:true};
+  const byP = rec.phone ? idx.p[rec.phone] : null;
+  const byE = rec.email ? idx.e[rec.email] : null;
+  if(byP && byP.length>1) return {client:null, how:'telefon (više osoba)', safe:false, reason:'CLIENT_MATCH_REVIEW'};
+  if(byE && byE.length>1) return {client:null, how:'e-mail (više osoba)', safe:false, reason:'CLIENT_MATCH_REVIEW'};
+  const p1 = byP && byP[0], e1 = byE && byE[0];
+  if(p1 && e1 && p1.id!==e1.id) return {client:null, how:'telefon≠e-mail', safe:false, reason:'CLIENT_MATCH_REVIEW'};
+  if(p1) return {client:p1, how:'telefon', safe:true};
+  if(e1) return {client:e1, how:'e-mail', safe:true};
+  const byN = rec.name ? idx.n[normName(rec.name)] : null;
+  if(byN && byN.length) return {client:null, how:'samo ime', safe:false, reason:'NAME_ONLY_REVIEW', candidate:byN[0]};
+  return {client:null, how:'nema', safe:true, isNew:true};
+}
+
+function UvozKlijentica({ data, onRefresh }){
+  const [file,setFile]     = useState(null);
+  const [hash,setHash]     = useState('');
+  const [cols,setCols]     = useState([]);
+  const [rows,setRows]     = useState([]);
+  const [map,setMap]       = useState({});
+  const [err,setErr]       = useState('');
+  const [busy,setBusy]     = useState(false);
+  const [toast,setToast]   = useState('');
+  const fileRef = useRef(null);
+
+  const jobs = (data.importJobs||[]).slice().sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+  const sameFile = hash ? jobs.find(j=>j.fileHash===hash) : null;
+
+  const idx = useMemo(()=>{
+    const z={},p={},e={},n={};
+    (data.clients||[]).forEach(c=>{ if(!c)return;
+      if(c.zoyyaId) z[String(c.zoyyaId)]=c;
+      const ph=uvPhoneN(c.phone); if(ph){ (p[ph]=p[ph]||[]).push(c); }
+      const em=uvEmail(c.email);  if(em){ (e[em]=e[em]||[]).push(c); }
+      clientNameKeys(c).forEach(k=>{ if(k) (n[k]=n[k]||[]).push(c); });
+    });
+    return {z,p,e,n};
+  }, [data.clients]);
+
+  const onFile = async f => {
+    if(!f) return;
+    setErr(''); setFile(f); setRows([]); setCols([]); setMap({});
+    try{
+      const buf = await f.arrayBuffer();
+      setHash(await uvHash(buf));
+      const wb = XLSX.read(new Uint8Array(buf), {type:'array', cellDates:false});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const head = (XLSX.utils.sheet_to_json(ws,{header:1,defval:''})[0]||[]).map(uvTrim).filter(Boolean);
+      const rws = XLSX.utils.sheet_to_json(ws,{defval:'',raw:false});
+      if(!rws.length){ setErr('Datoteka nema redaka.'); return; }
+      setCols(head); setRows(rws);
+      // auto-prijedlog mapiranja (vlasnica ga može promijeniti)
+      const prof = (data.importProfiles||{}).ZOYYA_CLIENT_EXPORT_V1;
+      const auto = {};
+      if(prof && prof.map){ Object.keys(prof.map).forEach(k=>{ if(head.includes(prof.map[k])) auto[k]=prof.map[k]; }); }
+      UV_FIELDS.forEach(([f])=>{ if(auto[f]) return;
+        const hit = head.find(h=>UV_HINTS[f] && UV_HINTS[f].test(h));
+        if(hit && !Object.values(auto).includes(hit)) auto[f]=hit; });
+      setMap(auto);
+    }catch(ex){ setErr('Ne mogu pročitati datoteku: '+((ex&&ex.message)||ex)); }
+  };
+
+  const recs = useMemo(()=> rows.length? ZoyyaFileImportAdapter(rows,map) : [], [rows,map]);
+
+  const dry = useMemo(()=>{
+    const out={total:recs.length,valid:0,neu:0,upd:0,same:0,review:0,badPhone:0,badEmail:0,noKey:0,dupInFile:0,items:[]};
+    const seenZ={}, seenP={};
+    recs.forEach(r=>{
+      if(!r.name && !r.phone && !r.email && !r.zoyyaId){ out.noKey++; return; }
+      out.valid++;
+      if(r.phoneRaw && !r.phone) out.badPhone++;
+      if(r.emailRaw && !r.email) out.badEmail++;
+      if(r.zoyyaId){ if(seenZ[r.zoyyaId]) out.dupInFile++; seenZ[r.zoyyaId]=1; }
+      else if(r.phone){ if(seenP[r.phone]) out.dupInFile++; seenP[r.phone]=1; }
+      const m = uvMatch(r, idx);
+      let kind, changes=[];
+      if(!m.safe){ kind='review'; out.review++; }
+      else if(m.client){
+        const c=m.client;
+        [['zoyyaId','zoyyaId'],['phone','phone'],['email','email'],['zoyyaStatus','zoyyaStatus'],
+         ['zoyyaCreatedAt','zoyyaCreatedAt'],['lastVisitAt','lastVisitAt']].forEach(([sf,cf])=>{
+          const nv=r[sf]; if(!nv) return;                       // prazno NE prepisuje
+          const ov=uvTrim(c[cf]); if(uvTrim(nv)!==ov) changes.push({f:cf,old:ov,nw:uvTrim(nv)});
+        });
+        if(changes.length){ kind='update'; out.upd++; } else { kind='same'; out.same++; }
+      } else { kind='new'; out.neu++; }
+      out.items.push({r,m,kind,changes});
+    });
+    return out;
+  }, [recs, idx]);
+
+  const unmapped = cols.filter(c=>!Object.values(map).includes(c));
+  const canRun = recs.length>0 && (map.fullName || (map.firstName&&map.lastName) || map.zoyyaId);
+
+  const runImport = async () => {
+    if(!__db){ alert('Nema veze s bazom.'); return; }
+    if(!confirm('UVOZ: '+dry.neu+' novih + '+dry.upd+' ažuriranih.\n\n'+dry.review+' zapisa ide na RUČNU PROVJERU (ne dira se).\nNiti jedna postojeća klijentica se ne briše; interne napomene ostaju.\n\nNastaviti?')) return;
+    setBusy(true);
+    const jobId='imp_'+Date.now().toString(36);
+    const at=new Date().toISOString();
+    const upd={}; const created=[]; const changed=[];
+    dry.items.forEach(it=>{
+      const r=it.r;
+      if(it.kind==='review' || it.kind==='same') return;
+      if(it.kind==='new'){
+        const id=uid();
+        upd['clients/'+id]={ id, name:r.name||('Zoyya '+r.zoyyaId), email:r.email||'', phone:r.phoneRaw||'',
+          birthday:'', notes:'', preferences:'', personality:'', source:'ZOYYA_FILE_IMPORT',
+          dolazak:'', status:'', referredBy:'', aliases:[], tags:[], createdAt:at,
+          zoyyaId:r.zoyyaId||'', zoyyaStatus:r.zoyyaStatus||'', zoyyaCreatedAt:r.zoyyaCreatedAt||'',
+          lastVisitAt:r.lastVisitAt||'', salonRaw:r.salonRaw||'',
+          // Klijentice su ZAJEDNIČKE za obje lokacije — salon se ne pripisuje niti traži;
+          // lokacija se izvodi iz povijesti dolazaka (gdje je najčešće bila).
+          needsReview:false, reviewReason:'',
+          importJobId:jobId, lastSyncAt:at, dataSource:'ZOYYA_FILE_IMPORT' };
+        created.push(id);
+      } else if(it.kind==='update'){
+        const c=it.m.client; const patch={};
+        it.changes.forEach(ch=>{ patch['clients/'+c.id+'/'+ch.f]=ch.nw; changed.push({id:c.id,f:ch.f,old:ch.old}); });
+        patch['clients/'+c.id+'/lastSyncAt']=at;
+        patch['clients/'+c.id+'/dataSource']='ZOYYA_FILE_IMPORT';
+        Object.assign(upd,patch);
+      }
+    });
+    upd['importJobs/'+jobId]={ id:jobId, at, fileName:(file&&file.name)||'', fileHash:hash,
+      rows:dry.total, valid:dry.valid, created:dry.neu, updated:dry.upd, unchanged:dry.same,
+      review:dry.review, dupInFile:dry.dupInFile, by:'admin', status:'done',
+      createdIds:created.slice(0,4000), changedFields:changed.slice(0,4000),
+      profile:'ZOYYA_CLIENT_EXPORT_V1' };
+    upd['importProfiles/ZOYYA_CLIENT_EXPORT_V1']={ map, savedAt:at };
+    const aid='a_'+uid();
+    upd['audit/'+aid]={ id:aid, at, action:'uvoz_klijentica', by:'admin', importJobId:jobId,
+      source:'ZOYYA_FILE_IMPORT', created:dry.neu, updated:dry.upd, review:dry.review };
+    try{
+      await __db.ref(FB_PATH).update(upd);
+      setBusy(false); setToast('✅ Uvoz gotov: '+dry.neu+' novih, '+dry.upd+' ažuriranih. Ništa nije obrisano.');
+      setFile(null); setRows([]); setCols([]); setHash(''); if(fileRef.current) fileRef.current.value='';
+    }catch(ex){ setBusy(false); alert('Greška pri uvozu: '+((ex&&ex.message)||ex)); }
+  };
+
+  const undoJob = async job => {
+    if(!__db) return;
+    if(!confirm('Poništiti uvoz od '+fmtDate(String(job.at).slice(0,10))+'?\n\n• vraća '+(job.changedFields||[]).length+' promijenjenih polja na staru vrijednost\n• briše '+(job.createdIds||[]).length+' klijentica koje je TAJ uvoz stvorio\n• ne dira ništa drugo')) return;
+    const upd={};
+    (job.changedFields||[]).forEach(ch=>{ upd['clients/'+ch.id+'/'+ch.f]=ch.old||''; });
+    (job.createdIds||[]).forEach(id=>{ upd['clients/'+id]=null; });
+    upd['importJobs/'+job.id+'/status']='rolled_back';
+    const aid='a_'+uid();
+    upd['audit/'+aid]={ id:aid, at:new Date().toISOString(), action:'ponisten_uvoz', by:'admin', importJobId:job.id };
+    try{ await __db.ref(FB_PATH).update(upd); setToast('Uvoz poništen.'); }
+    catch(ex){ alert('Greška: '+((ex&&ex.message)||ex)); }
+  };
+
+  const box={background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:16,marginBottom:14};
+  const Stat=({n,l,c})=>(<div style={{textAlign:'center',padding:'8px 12px',minWidth:92}}>
+    <div style={{fontSize:22,fontWeight:800,color:c||'var(--ink)'}}>{n}</div>
+    <div style={{fontSize:11,color:'var(--soft)',textTransform:'uppercase',fontWeight:700}}>{l}</div></div>);
+
+  return (
+    <div>
+      <div style={{background:'var(--amber-bg,#FBF3E2)',border:'1px solid #EBD9AE',color:'#6b5320',borderRadius:10,padding:'10px 13px',marginBottom:14,fontSize:12.5,lineHeight:1.5}}>
+        📥 <b>Uvoz klijentica iz Zoyye</b> — uvijek prvo <b>pregled (dry-run)</b>, pa tvoja potvrda. Uvoz <b>nikad ne briše</b> postojeće klijentice, ne dira interne napomene, a prazna ćelija ne prepisuje postojeći podatak. Nesigurna podudaranja idu na <b>ručnu provjeru</b>.
+      </div>
+      {toast && <div style={{background:'var(--green-bg,#EAF5EC)',border:'1px solid #BFE0C7',color:'var(--green,#2E7D46)',borderRadius:9,padding:'9px 12px',marginBottom:12,fontWeight:700,fontSize:13}}>{toast}</div>}
+
+      <div style={box}>
+        <div style={{fontWeight:800,marginBottom:8}}>1. Odaberi datoteku (CSV ili XLSX)</div>
+        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={e=>onFile(e.target.files[0])} style={{fontSize:13}}/>
+        {err && <div style={{color:'#C0392B',fontWeight:700,marginTop:8,fontSize:13}}>{err}</div>}
+        {file && <div style={{marginTop:8,fontSize:12.5,color:'var(--soft)'}}>📄 {file.name} · {rows.length} redaka · otisak {hash.slice(0,10)}…</div>}
+        {sameFile && <div style={{marginTop:8,background:'#FBECEA',border:'1px solid #F0C7C1',color:'#C0392B',borderRadius:8,padding:'8px 11px',fontSize:12.5,fontWeight:700}}>⚠️ Ova datoteka je već uvezena {fmtDate(String(sameFile.at).slice(0,10))}. Ponovni uvoz neće stvoriti duplikate, ali provjeri je li namjerno.</div>}
+      </div>
+
+      {cols.length>0 && (<div style={box}>
+        <div style={{fontWeight:800,marginBottom:4}}>2. Mapiranje stupaca <span style={{fontWeight:400,color:'var(--soft)',fontSize:12.5}}>(prijedlog — možeš promijeniti)</span></div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:8,marginTop:10}}>
+          {UV_FIELDS.map(([f,l])=>(
+            <div key={f} style={{display:'flex',alignItems:'center',gap:8,fontSize:12.5}}>
+              <span style={{minWidth:120,color:'var(--soft)',fontWeight:700}}>{l}</span>
+              <select value={map[f]||''} onChange={e=>setMap(m=>({...m,[f]:e.target.value}))}
+                style={{flex:1,border:'1.5px solid var(--border)',borderRadius:6,padding:'5px 7px',fontSize:12.5}}>
+                <option value="">— nije u datoteci —</option>
+                {cols.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>))}
+        </div>
+        {unmapped.length>0 && <div style={{marginTop:10,fontSize:12,color:'var(--soft)'}}>Nemapirani stupci (ignoriraju se): {unmapped.join(', ')}</div>}
+        {!canRun && <div style={{marginTop:10,color:'#C0392B',fontWeight:700,fontSize:12.5}}>Mapiraj barem „Ime i prezime" (ili Ime+Prezime) ili „Zoyya ID".</div>}
+      </div>)}
+
+      {canRun && (<div style={box}>
+        <div style={{fontWeight:800,marginBottom:8}}>3. Pregled prije uvoza (dry-run)</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:4,borderBottom:'1px solid var(--border)',paddingBottom:8,marginBottom:10}}>
+          <Stat n={dry.total} l="redaka"/><Stat n={dry.valid} l="valjanih"/>
+          <Stat n={dry.neu} l="NOVIH" c="var(--green,#2E7D46)"/>
+          <Stat n={dry.upd} l="ažurira" c="#B8860B"/>
+          <Stat n={dry.same} l="bez promj."/>
+          <Stat n={dry.review} l="RUČNA PROVJERA" c="#C0392B"/>
+          <Stat n={dry.dupInFile} l="dupl. u dat."/>
+          <Stat n={dry.badPhone} l="loš tel."/><Stat n={dry.badEmail} l="loš mail"/><Stat n={dry.noKey} l="prazni"/>
+        </div>
+        <div style={{maxHeight:280,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+            <thead><tr style={{background:'#F7F4EE'}}>{['Red','Ime','Telefon','E-mail','Radnja','Napomena'].map(h=>
+              <th key={h} style={{textAlign:'left',padding:'6px 8px',fontSize:10.5,textTransform:'uppercase',color:'var(--soft)',position:'sticky',top:0,background:'#F7F4EE'}}>{h}</th>)}</tr></thead>
+            <tbody>{dry.items.slice(0,300).map((it,i)=>{
+              const K={new:['NOVA','var(--green,#2E7D46)'],update:['AŽURIRA','#B8860B'],same:['bez promjene','var(--soft)'],review:['RUČNA PROVJERA','#C0392B']}[it.kind];
+              return (<tr key={i} style={{borderTop:'1px solid var(--border)'}}>
+                <td style={{padding:'5px 8px',color:'var(--soft)'}}>{it.r._row}</td>
+                <td style={{padding:'5px 8px',fontWeight:600}}>{it.r.name||'—'}</td>
+                <td style={{padding:'5px 8px'}}>{it.r.phone||<span style={{color:'#C0392B'}}>{it.r.phoneRaw||'—'}</span>}</td>
+                <td style={{padding:'5px 8px'}}>{it.r.email||<span style={{color:'#C0392B'}}>{it.r.emailRaw||'—'}</span>}</td>
+                <td style={{padding:'5px 8px',fontWeight:700,color:K[1]}}>{K[0]}</td>
+                <td style={{padding:'5px 8px',color:'var(--soft)'}}>{it.kind==='update'?it.changes.map(c=>c.f).join(', '):(it.m.how!=='nema'?('podudaranje: '+it.m.how):'')}</td>
+              </tr>);})}</tbody>
+          </table>
+        </div>
+        {dry.items.length>300 && <div style={{fontSize:12,color:'var(--soft)',marginTop:6}}>Prikazano prvih 300 od {dry.items.length}.</div>}
+        <div style={{marginTop:12,textAlign:'right'}}>
+          <button className="btn btn-primary" disabled={busy||(!dry.neu&&!dry.upd)} onClick={runImport}>
+            {busy?'Uvozim…':'📥 Uvezi ('+dry.neu+' novih, '+dry.upd+' ažuriranih)'}</button>
+        </div>
+      </div>)}
+
+      <div style={box}>
+        <div style={{fontWeight:800,marginBottom:8}}>Povijest uvoza</div>
+        {jobs.length===0 ? <div style={{color:'var(--soft)',fontSize:13}}>Još nema uvoza.</div> :
+        <div style={{overflowX:'auto'}}><table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
+          <thead><tr>{['Datum','Datoteka','Redaka','Novih','Ažur.','Provjera','Status',''].map(h=>
+            <th key={h} style={{textAlign:'left',padding:'6px 8px',fontSize:10.5,textTransform:'uppercase',color:'var(--soft)',borderBottom:'2px solid var(--border)'}}>{h}</th>)}</tr></thead>
+          <tbody>{jobs.map(j=>(<tr key={j.id} style={{borderBottom:'1px solid var(--border)'}}>
+            <td style={{padding:'6px 8px'}}>{fmtDate(String(j.at||'').slice(0,10))}</td>
+            <td style={{padding:'6px 8px'}}>{j.fileName||'—'}</td>
+            <td style={{padding:'6px 8px'}}>{j.rows}</td>
+            <td style={{padding:'6px 8px',color:'var(--green,#2E7D46)',fontWeight:700}}>{j.created}</td>
+            <td style={{padding:'6px 8px',color:'#B8860B',fontWeight:700}}>{j.updated}</td>
+            <td style={{padding:'6px 8px',color:'#C0392B'}}>{j.review}</td>
+            <td style={{padding:'6px 8px'}}>{j.status==='rolled_back'?'poništen':'gotov'}</td>
+            <td style={{padding:'6px 8px'}}>{j.status!=='rolled_back' && <button className="btn btn-sm btn-outline" onClick={()=>undoJob(j)}>Poništi</button>}</td>
+          </tr>))}</tbody>
+        </table></div>}
+      </div>
+    </div>
+  );
+}
+
 function App({ initialData }) {
   const [data,    setData]    = useState(()=>initialData||loadData());
   const [salonId, setSalonId] = useState(()=>{
@@ -7243,7 +7558,7 @@ function App({ initialData }) {
   const salonLabel = salonId==='all'?'Administrator — Svi saloni':(salon?.name||'Salon');
 
   const tabs = salonId==='all'
-    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['obracun','🧮 Obračun'],['alati','🔧 Alati'],['postavke','⚙️ Postavke'],['lozinka','🔑 Lozinka']]
+    ? [['financije','✦ Financije'],['pregled','📋 Pregled'],['statistike','📊 Statistike'],['klijentice','👥 Klijentice'],['skladiste','🏭 Skladište'],['troskovi','💸 Troškovi'],['provjera','💵 Provjera'],['kontrola','🧾 Kontrola'],['semafor','🚦 Semafor'],['obracun','🧮 Obračun'],['uvoz','📥 Uvoz'],['alati','🔧 Alati'],['postavke','⚙️ Postavke'],['lozinka','🔑 Lozinka']]
     : [['unos','➕ Novi unos'],['pregled','📋 Pregled'],['provjera','💵 Provjera'],['klijentice','👥 Klijentice'],['postavke','⚙️ Postavke']];
 
   return (
@@ -7312,6 +7627,7 @@ function App({ initialData }) {
         {tab==='kontrola'    && <Kontrola    data={data} onRefresh={refresh}/>}
         {tab==='semafor'     && <Semafor     data={data}/>}
         {tab==='obracun'     && <Obracun     data={data} onRefresh={refresh}/>}
+        {tab==='uvoz'        && <UvozKlijentica data={data} onRefresh={refresh}/>}
         {tab==='lozinka'     && <PromjenaLozinke />}
         {tab==='alati'       && <Alati       data={data} salonId={salonId} onRefresh={refresh} onSwitchTab={setTab}/>}
         {tab==='postavke'    && <Postavke    data={data} salonId={salonId} onRefresh={refresh} onLogout={logout}/>}

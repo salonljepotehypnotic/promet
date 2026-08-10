@@ -1,1 +1,6 @@
 backups/
+zoyya/
+*.zoyya.csv
+*.zoyya.xlsx
+klijentice-izvoz*.csv
+klijentice-izvoz*.xlsx
