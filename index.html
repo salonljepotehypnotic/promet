@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080604;
+const APP_VERSION = 2026080605;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -7238,8 +7238,8 @@ function UvozKlijentica({ data, onRefresh }){
   const recs = useMemo(()=> rows.length? ZoyyaFileImportAdapter(rows,map) : [], [rows,map]);
 
   const dry = useMemo(()=>{
-    const out={total:recs.length,valid:0,neu:0,upd:0,same:0,review:0,badPhone:0,badEmail:0,noKey:0,dupInFile:0,items:[]};
-    const seenZ={}, seenP={};
+    const out={total:recs.length,valid:0,neu:0,upd:0,same:0,review:0,badPhone:0,badEmail:0,noKey:0,dupInFile:0,dupSkip:0,items:[]};
+    const seenZ={}, seenP={}, seenPerson={};
     recs.forEach(r=>{
       if(!r.name && !r.phone && !r.email && !r.zoyyaId){ out.noKey++; return; }
       out.valid++;
@@ -7247,6 +7247,11 @@ function UvozKlijentica({ data, onRefresh }){
       if(r.emailRaw && !r.email) out.badEmail++;
       if(r.zoyyaId){ if(seenZ[r.zoyyaId]) out.dupInFile++; seenZ[r.zoyyaId]=1; }
       else if(r.phone){ if(seenP[r.phone]) out.dupInFile++; seenP[r.phone]=1; }
+      // ISTA OSOBA DVAPUT U DATOTECI: isti telefon/e-mail + ISTO ime → preskoči drugi zapis.
+      // (isti telefon + DRUGO ime = obitelj dijeli broj → obje se zadrže)
+      const nk = normName(r.name||'');
+      const pk = nk && (r.phone ? nk+'|t|'+r.phone : (r.email ? nk+'|e|'+r.email : ''));
+      if(pk){ if(seenPerson[pk]){ out.dupSkip++; out.items.push({r,m:{how:'ista osoba već u datoteci'},kind:'dupfile',changes:[]}); return; } seenPerson[pk]=1; }
       const m = uvMatch(r, idx);
       let kind, changes=[];
       if(!m.safe){ kind='review'; out.review++; }
@@ -7384,7 +7389,8 @@ function UvozKlijentica({ data, onRefresh }){
           <Stat n={dry.upd} l="ažurira" c="#B8860B"/>
           <Stat n={dry.same} l="bez promj."/>
           <Stat n={dry.review} l="RUČNA PROVJERA" c="#C0392B"/>
-          <Stat n={dry.dupInFile} l="dupl. u dat."/>
+          <Stat n={dry.dupInFile} l="isti tel. u dat."/>
+          <Stat n={dry.dupSkip} l="PRESKOČENO (dvojnik)" c="#8E44AD"/>
           <Stat n={dry.badPhone} l="loš tel."/><Stat n={dry.badEmail} l="loš mail"/><Stat n={dry.noKey} l="prazni"/>
         </div>
         <div style={{maxHeight:280,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8}}>
@@ -7392,7 +7398,7 @@ function UvozKlijentica({ data, onRefresh }){
             <thead><tr style={{background:'#F7F4EE'}}>{['Red','Ime','Telefon','E-mail','Radnja','Napomena'].map(h=>
               <th key={h} style={{textAlign:'left',padding:'6px 8px',fontSize:10.5,textTransform:'uppercase',color:'var(--soft)',position:'sticky',top:0,background:'#F7F4EE'}}>{h}</th>)}</tr></thead>
             <tbody>{dry.items.slice(0,300).map((it,i)=>{
-              const K={new:['NOVA','var(--green,#2E7D46)'],update:['AŽURIRA','#B8860B'],same:['bez promjene','var(--soft)'],review:['RUČNA PROVJERA','#C0392B']}[it.kind];
+              const K={new:['NOVA','var(--green,#2E7D46)'],update:['AŽURIRA','#B8860B'],same:['bez promjene','var(--soft)'],review:['RUČNA PROVJERA','#C0392B'],dupfile:['DVOJNIK — preskačem','#8E44AD']}[it.kind];
               return (<tr key={i} style={{borderTop:'1px solid var(--border)'}}>
                 <td style={{padding:'5px 8px',color:'var(--soft)'}}>{it.r._row}</td>
                 <td style={{padding:'5px 8px',fontWeight:600}}>{it.r.name||'—'}</td>
