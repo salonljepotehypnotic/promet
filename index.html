@@ -197,7 +197,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080607;
+const APP_VERSION = 2026080608;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -7186,7 +7186,15 @@ function uvMatch(rec, idx){
   if(p1) return {client:p1, how:'telefon', safe:true};
   if(e1) return {client:e1, how:'e-mail', safe:true};
   const byN = rec.name ? idx.n[normName(rec.name)] : null;
-  if(byN && byN.length) return {client:null, how:'samo ime', safe:false, reason:'NAME_ONLY_REVIEW', candidate:byN[0], candidates:byN};
+  if(byN && byN.length){
+    // Ako smo TU ISTU osobu vec uvezli iz Zoyye (isto ime, a red nema ni telefon ni e-mail),
+    // onda je to ISTI zapis — nije slucaj za rucnu provjeru (inace bi se prepoznavao sam sa sobom).
+    if(!rec.phone && !rec.email){
+      const mine = byN.find(c=>c && c.dataSource==='ZOYYA_FILE_IMPORT');
+      if(mine) return {client:mine, how:'već uvezeno', safe:true};
+    }
+    return {client:null, how:'samo ime', safe:false, reason:'NAME_ONLY_REVIEW', candidate:byN[0], candidates:byN};
+  }
   return {client:null, how:'nema', safe:true, isNew:true};
 }
 
