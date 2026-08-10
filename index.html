@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080602;
+const APP_VERSION = 2026080604;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -3261,11 +3261,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
           {/* Zoyya import */}
           <div style={{background:'#E8F5E9',border:'1.5px solid #A5D6A7',borderRadius:10,padding:'14px 18px',marginBottom:16}}>
             <div style={{fontWeight:700,fontSize:14,color:'#2E7D32',marginBottom:6}}>📥 Uvoz klijentica iz Zoyye</div>
-            <p style={{fontSize:12,color:'#555',marginBottom:10}}>Eksportiraj klijentice iz Zoyye (Klijenti → Export → CSV) i učitaj ovdje. Uvozit će se samo <strong>nove</strong> klijentice — one koje već postoje po imenu bit će preskočene.</p>
-            <label className="btn btn-sm" style={{cursor:'pointer',background:'#2E7D32',color:'#fff',border:'none'}}>
-              📂 Odaberi Zoyya CSV datoteku
-              <input type="file" accept=".csv" onChange={importZoyya} style={{display:'none'}}/>
-            </label>
+            <p style={{fontSize:12,color:'#555',marginBottom:0}}>Premješteno u <strong>Administrator → 📥 Uvoz</strong> — ondje uvoz ima <strong>pregled prije upisa</strong>, prepoznavanje po telefonu/e-mailu, ručnu provjeru nesigurnih, povijest uvoza i <strong>mogućnost poništavanja</strong>. Stari, grublji uvoz (spajanje po imenu) je isključen radi sigurnosti podataka.</p>
           </div>
           <div style={{background:'#F8F9FA',borderRadius:8,padding:'12px 16px',fontSize:12,color:'#888',marginBottom:16}}>
             Baza: <strong>{data.entries.length}</strong> unosa · <strong>{data.salons.length}</strong> salona · <strong>{data.staff.length}</strong> djelatnica · <strong>{data.services.length}</strong> usluga · <strong>{(data.clients||[]).length}</strong> klijentica
@@ -7121,6 +7117,9 @@ const UV_FIELDS = [
   ['zoyyaCreatedAt','Datum kreiranja'],
   ['lastVisitAt',  'Zadnji dolazak'],
   ['salonRaw',     'Salon / lokacija'],
+  ['birthday',     'Datum rođenja'],
+  ['zoyyaNote',    'Napomena (Zoyya)'],
+  ['gender',       'Spol'],
 ];
 const UV_HINTS = {
   zoyyaId:/(zoyya).*(id)|^id$|^client.?id$|šifra|sifra/i,
@@ -7133,6 +7132,9 @@ const UV_HINTS = {
   zoyyaCreatedAt:/kreiran|created|registr|datum unosa/i,
   lastVisitAt:/zadnj|posljednj|last.?visit|posjet|dolazak/i,
   salonRaw:/salon|lokacij|location|poslovnic|podru[zž]nic/i,
+  birthday:/ro[đdj]en|birth|datum ro/i,
+  zoyyaNote:/napomen|note|bilje[sš]k/i,
+  gender:/spol|gender/i,
 };
 const uvTrim = v => String(v==null?'':v).replace(/\s+/g,' ').trim();
 const uvEmail = v => { const s=uvTrim(v).toLowerCase(); return /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(s)?s:''; };
@@ -7153,7 +7155,8 @@ function ZoyyaFileImportAdapter(rows, map){
     return { _row:i+2, zoyyaId:g(r,'zoyyaId'), name,
       phone:uvPhoneN(phoneRaw), phoneRaw, email:uvEmail(emailRaw), emailRaw,
       zoyyaStatus:g(r,'zoyyaStatus'), zoyyaCreatedAt:g(r,'zoyyaCreatedAt'),
-      lastVisitAt:g(r,'lastVisitAt'), salonRaw:g(r,'salonRaw') };
+      lastVisitAt:g(r,'lastVisitAt'), salonRaw:g(r,'salonRaw'),
+      birthday:g(r,'birthday'), zoyyaNote:g(r,'zoyyaNote'), gender:g(r,'gender') };
   });
 }
 // ── ADAPTER (stub): budući Zoyya API — isti izlazni oblik, isti pipeline ──
@@ -7249,11 +7252,16 @@ function UvozKlijentica({ data, onRefresh }){
       if(!m.safe){ kind='review'; out.review++; }
       else if(m.client){
         const c=m.client;
-        [['zoyyaId','zoyyaId'],['phone','phone'],['email','email'],['zoyyaStatus','zoyyaStatus'],
-         ['zoyyaCreatedAt','zoyyaCreatedAt'],['lastVisitAt','lastVisitAt']].forEach(([sf,cf])=>{
-          const nv=r[sf]; if(!nv) return;                       // prazno NE prepisuje
-          const ov=uvTrim(c[cf]); if(uvTrim(nv)!==ov) changes.push({f:cf,old:ov,nw:uvTrim(nv)});
-        });
+        const put=(f,nv,ov)=>{ if(!uvTrim(nv)) return;        // prazno NE prepisuje
+          if(uvTrim(nv)!==uvTrim(ov)) changes.push({f,old:uvTrim(ov),nw:uvTrim(nv)}); };
+        // telefon/e-mail: usporedi NORMALIZIRANO (inače bi svaki drukčiji zapis izgledao kao promjena)
+        if(r.phone && uvPhoneN(c.phone)!==r.phone) changes.push({f:'phone',old:uvTrim(c.phone),nw:r.phoneRaw||r.phone});
+        if(r.email && uvEmail(c.email)!==r.email)  changes.push({f:'email',old:uvTrim(c.email),nw:r.email});
+        put('zoyyaId',r.zoyyaId,c.zoyyaId); put('zoyyaStatus',r.zoyyaStatus,c.zoyyaStatus);
+        put('zoyyaCreatedAt',r.zoyyaCreatedAt,c.zoyyaCreatedAt); put('lastVisitAt',r.lastVisitAt,c.lastVisitAt);
+        put('zoyyaNote',r.zoyyaNote,c.zoyyaNote); put('zoyyaGender',r.gender,c.zoyyaGender);
+        // rođendan: upiši SAMO ako kod nas nije upisan (nikad ne prepisuje postojeći)
+        if(uvTrim(r.birthday) && !uvTrim(c.birthday)) changes.push({f:'birthday',old:'',nw:uvTrim(r.birthday)});
         if(changes.length){ kind='update'; out.upd++; } else { kind='same'; out.same++; }
       } else { kind='new'; out.neu++; }
       out.items.push({r,m,kind,changes});
@@ -7277,7 +7285,8 @@ function UvozKlijentica({ data, onRefresh }){
       if(it.kind==='new'){
         const id=uid();
         upd['clients/'+id]={ id, name:r.name||('Zoyya '+r.zoyyaId), email:r.email||'', phone:r.phoneRaw||'',
-          birthday:'', notes:'', preferences:'', personality:'', source:'ZOYYA_FILE_IMPORT',
+          birthday:r.birthday||'', notes:'', preferences:'', personality:'', source:'ZOYYA_FILE_IMPORT',
+          zoyyaNote:r.zoyyaNote||'', zoyyaGender:r.gender||'',
           dolazak:'', status:'', referredBy:'', aliases:[], tags:[], createdAt:at,
           zoyyaId:r.zoyyaId||'', zoyyaStatus:r.zoyyaStatus||'', zoyyaCreatedAt:r.zoyyaCreatedAt||'',
           lastVisitAt:r.lastVisitAt||'', salonRaw:r.salonRaw||'',
