@@ -195,7 +195,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080601;
+const APP_VERSION = 2026080602;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -7304,7 +7304,14 @@ function UvozKlijentica({ data, onRefresh }){
     upd['audit/'+aid]={ id:aid, at, action:'uvoz_klijentica', by:'admin', importJobId:jobId,
       source:'ZOYYA_FILE_IMPORT', created:dry.neu, updated:dry.upd, review:dry.review };
     try{
-      await __db.ref(FB_PATH).update(upd);
+      // Upis u PORCIJAMA (Firebase ne podnosi tisuće ključeva odjednom).
+      const keys=Object.keys(upd); const CH=400; let done=0;
+      for(let i=0;i<keys.length;i+=CH){
+        const part={}; keys.slice(i,i+CH).forEach(k=>{ part[k]=upd[k]; });
+        await __db.ref(FB_PATH).update(part);
+        done+=Object.keys(part).length;
+        setToast('Uvozim… '+Math.round(done/keys.length*100)+'%');
+      }
       setBusy(false); setToast('✅ Uvoz gotov: '+dry.neu+' novih, '+dry.upd+' ažuriranih. Ništa nije obrisano.');
       setFile(null); setRows([]); setCols([]); setHash(''); if(fileRef.current) fileRef.current.value='';
     }catch(ex){ setBusy(false); alert('Greška pri uvozu: '+((ex&&ex.message)||ex)); }
@@ -7325,7 +7332,7 @@ function UvozKlijentica({ data, onRefresh }){
 
   const box={background:'var(--card)',border:'1.5px solid var(--border)',borderRadius:12,padding:16,marginBottom:14};
   const Stat=({n,l,c})=>(<div style={{textAlign:'center',padding:'8px 12px',minWidth:92}}>
-    <div style={{fontSize:22,fontWeight:800,color:c||'var(--ink)'}}>{n}</div>
+    <div style={{fontSize:22,fontWeight:800,color:c||'var(--teal,#1F7A6E)'}}>{n}</div>
     <div style={{fontSize:11,color:'var(--soft)',textTransform:'uppercase',fontWeight:700}}>{l}</div></div>);
 
   return (
