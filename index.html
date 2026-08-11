@@ -197,7 +197,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080613;
+const APP_VERSION = 2026080614;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -242,7 +242,7 @@ const SEED_CLIENT_MAP = {};
 const SEED_CLIENT_IDS = new Set(Object.keys(SEED_CLIENT_MAP));
 
 function mergeWithFirebase(fbData) {
-  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, dnevneKontrole:[], audit:[], semaforConfig:{}, adminGate:{}, importJobs:[], importProfiles:{}, importDecisions:{} };
+  if (!fbData) return { ...SEED, inventory:[], stock:{}, consumptions:{}, prometPayments: DEFAULT_PROMET_PAYMENTS, clients: SEED.clients||[], expenses:[], tools:[], toolAssignments:[], alatInventar:[], alatRadovi:[], pointsLedger:[], verifications:[], staffPins:{}, deletedClients:{}, dnevneKontrole:[], audit:[], semaforConfig:{}, adminGate:{}, importJobs:[], importProfiles:{}, importDecisions:{} };
   const fbEntries = fbObjToArr(fbData.entries);
 
   // Clients: ALWAYS start with all SEED clients as baseline.
@@ -255,7 +255,9 @@ function mergeWithFirebase(fbData) {
   const mergedClients = (SEED.clients||[]).map(c => fbClientMap[c.id] || c);
   // Plus any NEW clients (not in SEED) that were added via the app
   const newClients = fbClientsArr.filter(c => c && !SEED_CLIENT_IDS.has(c.id));
-  const allClients = [...mergedClients, ...newClients];
+  // Trajno uklonjeni kartoni (spajanje dvojnika): seed klijentice se inace UVIJEK vracaju
+  const delMap = fbData.deletedClients || {};
+  const allClients = [...mergedClients, ...newClients].filter(c => c && !delMap[c.id]);
 
   // Staff: Firebase is authoritative, but add any SEED staff missing from Firebase
   // (so new staff added to SEED appear automatically without losing Firebase edits)
@@ -292,6 +294,7 @@ function mergeWithFirebase(fbData) {
     pointsLedger:    fbObjToArr(fbData.pointsLedger),
     verifications:   fbObjToArr(fbData.verifications),
     staffPins:       fbData.staffPins || {},
+    deletedClients:  fbData.deletedClients || {},
     dnevneKontrole:  fbObjToArr(fbData.dnevneKontrole),
     audit:           fbObjToArr(fbData.audit),
     semaforConfig:   fbData.semaforConfig || {},
@@ -317,7 +320,8 @@ function loadData() {
       (parsed.clients||[]).forEach(c => { if(c && c.id) storedClientMap[c.id] = c; });
       const mergedClients = (SEED.clients||[]).map(c => storedClientMap[c.id] || c);
       const newClients = (parsed.clients||[]).filter(c => c && !SEED_CLIENT_IDS.has(c.id));
-      return {...parsed, entries: allEntries, clients: [...mergedClients, ...newClients]};
+      const delL = parsed.deletedClients || {};
+      return {...parsed, entries: allEntries, clients: [...mergedClients, ...newClients].filter(c=>c && !delL[c.id])};
     }
   } catch(e) {}
   return mergeWithFirebase(null);
@@ -3483,6 +3487,8 @@ function Klijentice({ data, salonId, onRefresh, activeStaff }) {
     });
     if (otherIds.has(filled.referredBy) || filled.referredBy===survivorId) filled.referredBy=''; // ne referiraj na spojenog/sebe
     // klijentice: makni spojene, zamijeni survivor, preusmjeri referredBy koji je pokazivao na spojene
+    // trajno ukloni spojene (seed kartoni bi se inace vratili pri sljedecoj sinkronizaciji)
+    try { if(__db){ const t={}; otherIds.forEach(id=>{ t['deletedClients/'+id]=true; }); __db.ref(FB_PATH).update(t); } } catch(e){}
     const clients = data.clients
       .filter(c => !otherIds.has(c.id))
       .map(c => c.id===survivorId ? filled : (otherIds.has(c.referredBy) ? {...c, referredBy: survivorId} : c));
@@ -7460,7 +7466,8 @@ function UvozKlijentica({ data, onRefresh }){
         if(c.name && normName(c.name)!==normName(surv.name)) al.add(c.name);
         (c.aliases||[]).forEach(a=>al.add(a));
         (c.tags||[]).forEach(t=>tg.add(t));
-        upd['clients/'+c.id]=null;                        // makni dvojnika
+        upd['clients/'+c.id]=null;                        // makni iz baze (ako ondje postoji)
+        upd['deletedClients/'+c.id]=true;                 // i trajno (seed kartoni se inace vracaju)
         zmap[c.id]=surv.id; gone.add(c.id);
         const aid='a_'+uid();
         upd['audit/'+aid]={id:aid,at,action:'spajanje_dvojnika',by:'admin',survivorId:surv.id,ime:surv.name,mergedId:c.id,mergedIme:c.name};
