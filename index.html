@@ -197,7 +197,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080612;
+const APP_VERSION = 2026080613;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -247,7 +247,8 @@ function mergeWithFirebase(fbData) {
 
   // Clients: ALWAYS start with all SEED clients as baseline.
   // Firebase can override existing SEED clients (if edited) or add new ones.
-  const fbClientsArr = fbData.clients ? fbObjToArr(fbData.clients) : [];
+  // Zaštita: preskoči nepotpune zapise (bez id-a ili imena) da prikaz nikad ne pukne.
+  const fbClientsArr = (fbData.clients ? fbObjToArr(fbData.clients) : []).filter(c => c && c.id && c.name);
   const fbClientMap = {};
   fbClientsArr.forEach(c => { if(c && c.id) fbClientMap[c.id] = c; });
   // SEED clients, overridden by Firebase if they exist there
@@ -7449,26 +7450,29 @@ function UvozKlijentica({ data, onRefresh }){
     setBusy(true);
     const at=new Date().toISOString(); const upd={};
     const zmap={};
+    const gone=new Set();
     pairs.forEach(({surv,merge})=>{
-      const al=new Set(surv.aliases||[]); let ph=uvTrim(surv.phone), em=uvTrim(surv.email), bd=uvTrim(surv.birthday), zn=uvTrim(surv.zoyyaNote), zi=uvTrim(surv.zoyyaId);
+      const al=new Set(surv.aliases||[]); const tg=new Set(surv.tags||[]);
+      const f={...surv};                                  // KOMPLETAN karton (s id-om i imenom!)
       merge.forEach(c=>{
-        if(!ph && uvTrim(c.phone)){ ph=uvTrim(c.phone); upd['clients/'+surv.id+'/phone']=ph; }
-        if(!em && uvTrim(c.email)){ em=uvTrim(c.email); upd['clients/'+surv.id+'/email']=em; }
-        if(!bd && uvTrim(c.birthday)){ bd=uvTrim(c.birthday); upd['clients/'+surv.id+'/birthday']=bd; }
-        if(!zn && uvTrim(c.zoyyaNote)){ zn=uvTrim(c.zoyyaNote); upd['clients/'+surv.id+'/zoyyaNote']=zn; }
-        if(!zi && uvTrim(c.zoyyaId)){ zi=uvTrim(c.zoyyaId); upd['clients/'+surv.id+'/zoyyaId']=zi; }
+        ['email','phone','birthday','zoyyaNote','zoyyaId','zoyyaGender','dolazak','status','notes','preferences','personality']
+          .forEach(k=>{ if(!uvTrim(f[k]) && uvTrim(c[k])) f[k]=c[k]; });
         if(c.name && normName(c.name)!==normName(surv.name)) al.add(c.name);
         (c.aliases||[]).forEach(a=>al.add(a));
-        (c.tags||[]).forEach(t=>{});
-        upd['clients/'+c.id]=null;                                   // makni dvojnika
-        zmap[c.id]=surv.id;
+        (c.tags||[]).forEach(t=>tg.add(t));
+        upd['clients/'+c.id]=null;                        // makni dvojnika
+        zmap[c.id]=surv.id; gone.add(c.id);
         const aid='a_'+uid();
         upd['audit/'+aid]={id:aid,at,action:'spajanje_dvojnika',by:'admin',survivorId:surv.id,ime:surv.name,mergedId:c.id,mergedIme:c.name};
       });
       al.delete(surv.name);
-      upd['clients/'+surv.id+'/aliases']=[...al].filter(Boolean);
-      upd['clients/'+surv.id+'/lastSyncAt']=at;
+      f.aliases=[...al].filter(Boolean); f.tags=[...tg].filter(Boolean); f.lastSyncAt=at;
+      if(gone.has(f.referredBy)) f.referredBy=zmap[f.referredBy]||'';
+      upd['clients/'+surv.id]=f;                          // upiši CIJELI karton
     });
+    // klijentice koje su bile povezane sa spojenim kartonom -> preusmjeri (inace pukne prikaz)
+    (data.clients||[]).forEach(c=>{ if(c && c.referredBy && zmap[c.referredBy] && !gone.has(c.id))
+      upd['clients/'+c.id]={...c, referredBy:zmap[c.referredBy]}; });
     (data.entries||[]).forEach(e=>{ if(e && e.clientId && zmap[e.clientId]) upd['entries/'+e.id+'/clientId']=zmap[e.clientId]; });
     const keys=Object.keys(upd); const CH=400;
     try{
