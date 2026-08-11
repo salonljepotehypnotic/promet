@@ -197,7 +197,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080611;
+const APP_VERSION = 2026080612;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -7402,49 +7402,73 @@ function UvozKlijentica({ data, onRefresh }){
     setTimeout(()=>setToast(''),4000);
   };
 
-  // ── Parovi "stara klijentica (povijest, bez telefona)" + "zapis iz Zoyye (telefon)" ──
+  // ── SIGURNE GRUPE ZA SPAJANJE ────────────────────────────────────────────
+  // Grupiramo po imenu BEZ kvačica. Glavni karton = onaj s najviše posjeta.
+  // Zapis se spaja SAMO ako je sigurno ista osoba:
+  //   • ima ISTI telefon kao glavni, ILI isti e-mail, ILI
+  //   • uopće nema ni telefon ni e-mail (nema se s čime sukobiti), ILI
+  //   • glavni nema kontakt, a ovaj je JEDINI u grupi s kontaktom
+  // Zapis s DRUGIM telefonom/mailom = moguća imenjakinja → NE dira se (ide ručno).
   const zoyPairs = useMemo(()=>{
     const byFold={};
     (data.clients||[]).forEach(c=>{ if(!c||!c.name) return; const f=foldName(c.name); if(f) (byFold[f]=byFold[f]||[]).push(c); });
-    const visitsByFold={};
-    (data.entries||[]).forEach(e=>{ if(!e) return; const f=foldName(e.clientName||''); if(f) visitsByFold[f]=(visitsByFold[f]||0)+1; });
+    const vis={}, spend={};
+    (data.entries||[]).forEach(e=>{ if(!e) return; const f=foldName(e.clientName||''); if(!f) return;
+      vis[f]=(vis[f]||0)+1; spend[f]=(spend[f]||0)+Number(e.total||0); });
+    const visOf = c => vis[foldName(c.name)]||0;
     const out=[];
     Object.keys(byFold).forEach(f=>{
-      const g=byFold[f]; if(g.length!==2) return;                     // samo čisti parovi (1:1)
-      const zoy=g.find(c=>c.dataSource==='ZOYYA_FILE_IMPORT' && (c.phone||c.email));
-      const surv=g.find(c=>c!==zoy && c.dataSource!=='ZOYYA_FILE_IMPORT');
-      if(!zoy||!surv) return;
+      const g=byFold[f]; if(g.length<2) return;
+      const sorted=[...g].sort((a,b)=> visOf(b)-visOf(a) || ((uvPhoneN(b.phone)?1:0)-(uvPhoneN(a.phone)?1:0)));
+      const surv=sorted[0]; const rest=sorted.slice(1);
+      const sPh=uvPhoneN(surv.phone), sEm=uvEmail(surv.email);
+      const withContact = g.filter(c=>uvPhoneN(c.phone)||uvEmail(c.email));
+      const safe=[], risky=[];
+      rest.forEach(c=>{
+        const ph=uvPhoneN(c.phone), em=uvEmail(c.email);
+        const sameP = ph && sPh && ph===sPh, sameE = em && sEm && em===sEm;
+        const noContact = !ph && !em;
+        const onlyOneHasContact = !sPh && !sEm && withContact.length===1 && (ph||em);
+        if(sameP || sameE || noContact || onlyOneHasContact) safe.push(c); else risky.push(c);
+      });
+      if(!safe.length) return;
       const gets=[];
-      if(zoy.phone && !uvTrim(surv.phone)) gets.push('telefon');
-      if(zoy.email && !uvTrim(surv.email)) gets.push('e-mail');
-      if(zoy.birthday && !uvTrim(surv.birthday)) gets.push('rođendan');
-      if(!gets.length) return;                                        // nema što dobiti → preskoči
-      out.push({surv,zoy,gets,visits:visitsByFold[f]||0});
+      safe.forEach(c=>{ if(uvPhoneN(c.phone) && !sPh && !gets.includes('telefon')) gets.push('telefon');
+        if(uvEmail(c.email) && !sEm && !gets.includes('e-mail')) gets.push('e-mail');
+        if(uvTrim(c.birthday) && !uvTrim(surv.birthday) && !gets.includes('rođendan')) gets.push('rođendan'); });
+      out.push({surv, merge:safe, risky:risky.length, visits:visOf(surv), spend:Math.round(spend[f]||0),
+                gets: gets.length?gets:['spajanje kartona']});
     });
     return out.sort((a,b)=>b.visits-a.visits);
   }, [data.clients, data.entries]);
 
   const mergeZoyPairs = async pairs => {
     if(!__db || !pairs.length) return;
-    if(!confirm('Spojiti '+pairs.length+' parova?\n\n• stara klijentica ZADRŽAVA povijest dolazaka i napomene\n• DOBIVA telefon/e-mail/rođendan iz Zoyye\n• drugo ime se pamti kao alias\n• zapis iz Zoyye se uklanja (bio je dvojnik)\n\nMože se vratiti iz backupa.')) return;
+    const tot=pairs.reduce((n,p)=>n+p.merge.length,0);
+    if(!confirm('Spojiti '+tot+' kartona u '+pairs.length+' grupa?\n\n• glavni karton (najviše dolazaka) ZADRŽAVA povijest, napomene i bodove\n• DOBIVA telefon/e-mail/rođendan koji mu fale\n• druga imena se pamte kao alias — termini se i dalje hvataju\n• zapisi s DRUGIM telefonom se NE diraju (moguće imenjakinje)\n\nMože se vratiti iz backupa.')) return;
     setBusy(true);
     const at=new Date().toISOString(); const upd={};
-    pairs.forEach(({surv,zoy})=>{
-      if(zoy.phone && !uvTrim(surv.phone))       upd['clients/'+surv.id+'/phone']=zoy.phone;
-      if(zoy.email && !uvTrim(surv.email))       upd['clients/'+surv.id+'/email']=zoy.email;
-      if(zoy.birthday && !uvTrim(surv.birthday)) upd['clients/'+surv.id+'/birthday']=zoy.birthday;
-      if(zoy.zoyyaNote && !uvTrim(surv.zoyyaNote)) upd['clients/'+surv.id+'/zoyyaNote']=zoy.zoyyaNote;
-      if(zoy.zoyyaId && !uvTrim(surv.zoyyaId))   upd['clients/'+surv.id+'/zoyyaId']=zoy.zoyyaId;
-      const al=new Set(surv.aliases||[]); if(zoy.name && normName(zoy.name)!==normName(surv.name)) al.add(zoy.name);
-      (zoy.aliases||[]).forEach(a=>al.add(a)); al.delete(surv.name);
+    const zmap={};
+    pairs.forEach(({surv,merge})=>{
+      const al=new Set(surv.aliases||[]); let ph=uvTrim(surv.phone), em=uvTrim(surv.email), bd=uvTrim(surv.birthday), zn=uvTrim(surv.zoyyaNote), zi=uvTrim(surv.zoyyaId);
+      merge.forEach(c=>{
+        if(!ph && uvTrim(c.phone)){ ph=uvTrim(c.phone); upd['clients/'+surv.id+'/phone']=ph; }
+        if(!em && uvTrim(c.email)){ em=uvTrim(c.email); upd['clients/'+surv.id+'/email']=em; }
+        if(!bd && uvTrim(c.birthday)){ bd=uvTrim(c.birthday); upd['clients/'+surv.id+'/birthday']=bd; }
+        if(!zn && uvTrim(c.zoyyaNote)){ zn=uvTrim(c.zoyyaNote); upd['clients/'+surv.id+'/zoyyaNote']=zn; }
+        if(!zi && uvTrim(c.zoyyaId)){ zi=uvTrim(c.zoyyaId); upd['clients/'+surv.id+'/zoyyaId']=zi; }
+        if(c.name && normName(c.name)!==normName(surv.name)) al.add(c.name);
+        (c.aliases||[]).forEach(a=>al.add(a));
+        (c.tags||[]).forEach(t=>{});
+        upd['clients/'+c.id]=null;                                   // makni dvojnika
+        zmap[c.id]=surv.id;
+        const aid='a_'+uid();
+        upd['audit/'+aid]={id:aid,at,action:'spajanje_dvojnika',by:'admin',survivorId:surv.id,ime:surv.name,mergedId:c.id,mergedIme:c.name};
+      });
+      al.delete(surv.name);
       upd['clients/'+surv.id+'/aliases']=[...al].filter(Boolean);
       upd['clients/'+surv.id+'/lastSyncAt']=at;
-      upd['clients/'+zoy.id]=null;                                   // makni dvojnika iz Zoyye
-      const aid='a_'+uid();
-      upd['audit/'+aid]={id:aid,at,action:'spajanje_dvojnika_zoyya',by:'admin',survivorId:surv.id,ime:surv.name,mergedId:zoy.id};
     });
-    // budući unosi koji pokazuju na dvojnika → preusmjeri na preživjelu
-    const zmap={}; pairs.forEach(({surv,zoy})=>{ zmap[zoy.id]=surv.id; });
     (data.entries||[]).forEach(e=>{ if(e && e.clientId && zmap[e.clientId]) upd['entries/'+e.id+'/clientId']=zmap[e.clientId]; });
     const keys=Object.keys(upd); const CH=400;
     try{
@@ -7558,34 +7582,35 @@ function UvozKlijentica({ data, onRefresh }){
         {reviewItems.length>150 && <div style={{fontSize:12,color:'var(--soft)',marginTop:6}}>Prikazano prvih 150 od {reviewItems.length}. Riješi ove pa se pojave sljedeći.</div>}
       </div>)}
 
-      {/* ── SIGURNO SPAJANJE DVOJNIKA IZ ZOYYE (radi bez datoteke) ── */}
-      {(()=>{
-        const pairs = zoyPairs;
+      {/* ── SIGURNO SKUPNO SPAJANJE DVOJNIKA (radi bez datoteke) ── */}
+      {(()=>{ const pairs=zoyPairs; const totalMerge=pairs.reduce((n,p)=>n+p.merge.length,0);
+        const riskyTotal=pairs.reduce((n,p)=>n+p.risky,0);
         return (<div style={{...box,borderColor:'#D9C7A0'}}>
-          <div style={{fontWeight:800,marginBottom:4}}>🔀 Dvojnici iz Zoyye — sigurno spajanje ({pairs.length})</div>
+          <div style={{fontWeight:800,marginBottom:4}}>🔀 Sigurno skupno spajanje ({pairs.length} grupa · {totalMerge} kartona)</div>
           <div style={{color:'var(--soft)',fontSize:12.5,marginBottom:10,lineHeight:1.5}}>
-            Parovi gdje <b>isto ime</b> (bez obzira na kvačice) postoji <b>točno dvaput</b>: jednom tvoja stara klijentica
-            (s poviješću dolazaka, bez telefona) i jednom zapis uvezen iz Zoyye (s telefonom, bez povijesti).
-            Spajanjem <b>stara zadrži povijest i dobije telefon</b>. Drugo ime se pamti kao alias pa se termini i dalje hvataju.
+            Spajam samo ono što je <b>sigurno ista osoba</b>: isti telefon ili e-mail kao glavni karton, ili zapis
+            <b> bez ikakvog kontakta</b>. Glavni karton = onaj s <b>najviše dolazaka</b> (zadrži povijest, napomene i bodove).
+            {riskyTotal>0 && <> <b style={{color:'#B4544A'}}>{riskyTotal} zapisa s DRUGIM telefonom/mailom ne diram</b> — mogu biti imenjakinje, njih riješi ručno u Klijentice → Duplikati.</>}
           </div>
-          {pairs.length===0 ? <div style={{color:'var(--soft)',fontSize:13}}>Nema takvih parova. 👍</div> : (<>
-            <div style={{maxHeight:300,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,marginBottom:12}}>
+          {pairs.length===0 ? <div style={{color:'var(--soft)',fontSize:13}}>Nema sigurnih grupa za spajanje. 👍</div> : (<>
+            <div style={{maxHeight:320,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,marginBottom:12}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
-                <thead><tr style={{background:'var(--paper)'}}>{['Ostaje (tvoja, s poviješću)','Spaja se (iz Zoyye)','Dobiva'].map(h=>
+                <thead><tr style={{background:'var(--paper)'}}>{['Glavni karton (ostaje)','Spaja se','Dobiva','Rizično'].map(h=>
                   <th key={h} style={{textAlign:'left',padding:'6px 8px',fontSize:10.5,textTransform:'uppercase',color:'var(--soft)',position:'sticky',top:0,background:'var(--paper)'}}>{h}</th>)}</tr></thead>
-                <tbody>{pairs.slice(0,120).map((p,i)=>(
+                <tbody>{pairs.slice(0,150).map((p,i)=>(
                   <tr key={i} style={{borderTop:'1px solid var(--border)'}}>
-                    <td style={{padding:'6px 8px'}}><b>{p.surv.name}</b><div style={{color:'var(--soft)',fontSize:11.5}}>{p.visits} dolazaka{p.surv.phone?' · '+p.surv.phone:' · bez telefona'}</div></td>
-                    <td style={{padding:'6px 8px'}}>{p.zoy.name}<div style={{color:'var(--soft)',fontSize:11.5}}>{p.zoy.phone||'—'}{p.zoy.email?' · '+p.zoy.email:''}</div></td>
-                    <td style={{padding:'6px 8px',color:'var(--green,#3F8F5F)',fontWeight:700}}>{p.gets.join(', ')||'—'}</td>
+                    <td style={{padding:'6px 8px'}}><b>{p.surv.name}</b><div style={{color:'var(--soft)',fontSize:11.5}}>{p.visits} dolazaka · {fmt(p.spend)} €{p.surv.phone?' · '+p.surv.phone:''}</div></td>
+                    <td style={{padding:'6px 8px'}}>{p.merge.map(c=>c.name).join(', ')}</td>
+                    <td style={{padding:'6px 8px',color:'var(--green,#3F8F5F)',fontWeight:700}}>{p.gets.join(', ')}</td>
+                    <td style={{padding:'6px 8px',color:p.risky?'#B4544A':'var(--soft)'}}>{p.risky?p.risky+' ostaje':'—'}</td>
                   </tr>))}</tbody>
               </table>
             </div>
-            {pairs.length>120 && <div style={{fontSize:12,color:'var(--soft)',marginBottom:8}}>Prikazano prvih 120 od {pairs.length}.</div>}
+            {pairs.length>150 && <div style={{fontSize:12,color:'var(--soft)',marginBottom:8}}>Prikazano prvih 150 od {pairs.length}.</div>}
             <button className="btn btn-primary" disabled={busy} onClick={()=>mergeZoyPairs(pairs)}>
-              🔀 Spoji sve ({pairs.length})
+              🔀 Spoji sigurne ({totalMerge} kartona u {pairs.length} grupa)
             </button>
-            <span style={{marginLeft:10,fontSize:12,color:'var(--soft)'}}>Termini i napomene ostaju. Backup imaš — može se vratiti.</span>
+            <span style={{marginLeft:10,fontSize:12,color:'var(--soft)'}}>Termini, napomene i bodovi ostaju. Backup imaš.</span>
           </>)}
         </div>);
       })()}
