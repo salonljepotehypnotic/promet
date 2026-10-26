@@ -199,7 +199,7 @@ const FB_PATH = 'hypnotic';
 // Kad najnoviji uređaj objavi svoju verziju u bazu, stariji uređaji to vide i SAMI se
 // osvježe (novi kod) — kraj ere "svi moraju Ctrl+Shift+R". Ovo je ključ stabilnosti:
 // stari tab (stari kod) više ne može tiho prepisati/izbrisati podatke jer se prije toga ažurira.
-const APP_VERSION = 2026080614;
+const APP_VERSION = 2026102601;
 const __db = window.__firebaseDb || null;
 
 // Payment methods that count toward staff revenue (configurable by admin)
@@ -397,6 +397,40 @@ function saveData(data) {
 const today = () => new Date().toISOString().slice(0,10);
 // Današnji datum prema zoni Europe/Zagreb (za prikaz djelatnici — ne ovisi o UTC/preglednik zoni)
 const todayZagreb = () => { try { return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Zagreb'}).format(new Date()); } catch(e){ return today(); } };
+
+// ─── Uloga djelatnice kroz vrijeme (roleHistory) ─────────────────────────────
+// Segment: {role:'djelatnica'|'praktikantica', from:'YYYY-MM-DD'|null, to:'YYYY-MM-DD'|null, by, at, reason}
+//   from=null => od početka (nepoznato),  to=null => otvoreno (do danas/nadalje).
+// Migracija: osoba bez roleHistory dobiva JEDAN segment {role: trenutni, from:null, to:null},
+// pa roleOn(bilo koji prošli datum)=trenutna uloga => svi prošli obračuni ostaju IDENTIČNI.
+const DAY_BEFORE = ds => { try { const d=new Date(ds+'T12:00:00Z'); d.setUTCDate(d.getUTCDate()-1); return d.toISOString().slice(0,10); } catch(e){ return ds; } };
+function roleSegments(s){
+  if (s && Array.isArray(s.roleHistory) && s.roleHistory.length) return s.roleHistory;
+  return [{ role: (s && s.role) || 'djelatnica', from: null, to: null, reason: 'MIGRACIJA — početno stanje' }];
+}
+function roleOnSegs(segs, dateStr){
+  for (const sg of (segs||[])){
+    const f = sg.from || '0000-01-01', t = sg.to || '9999-12-31';
+    if (dateStr >= f && dateStr <= t) return sg.role;
+  }
+  const last = (segs||[])[ (segs||[]).length-1 ];
+  return (last && last.role) || 'djelatnica';
+}
+const roleOn = (s, dateStr) => roleOnSegs(roleSegments(s), dateStr);
+// Pravilo vlasnice (potvrđeno): djelatnica "pokriva" cijeli mjesec — ako je osoba ijedan
+// dan u mjesecu bila djelatnica, cijeli se mjesec obračunava kao djelatnica.
+function roleForMonth(s, month){
+  const ms = month+'-01', me = month+'-31';
+  let sawPrakt = false;
+  for (const sg of roleSegments(s)){
+    const f = sg.from || '0000-01-01', t = sg.to || '9999-12-31';
+    if (f <= me && t >= ms){
+      if (sg.role === 'djelatnica') return 'djelatnica';
+      sawPrakt = true;
+    }
+  }
+  return sawPrakt ? 'praktikantica' : ((s && s.role) || 'djelatnica');
+}
 const fmt = n => Number(n||0).toLocaleString('hr-HR', {minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtDate = d => { if(!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}.${m}.${y}`; };
 const monthKey = d => d ? d.slice(0,7) : '';
@@ -2892,6 +2926,30 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
   const [newStaff,setNewStaff]=useState('');
   const [newStaffRole,setNewStaffRole]=useState('djelatnica');
   const [newStaffSalon,setNewStaffSalon]=useState('all');
+  // ── Promjena uloge (djelatnica ↔ praktikantica) od datuma — SAMO admin ──
+  const firstOfNextMonth = (()=>{ const [y,m]=todayZagreb().split('-').map(Number); return new Date(Date.UTC(y,m,1)).toISOString().slice(0,10); })();
+  const [roleEditId,setRoleEditId]=useState(null);
+  const [rcRole,setRcRole]=useState('djelatnica');
+  const [rcFrom,setRcFrom]=useState(firstOfNextMonth);
+  const [rcReason,setRcReason]=useState('');
+  const openRoleEdit=(s)=>{ const cur=roleOn(s,todayZagreb()); setRoleEditId(s.id); setRcRole(cur==='praktikantica'?'djelatnica':'praktikantica'); setRcFrom(firstOfNextMonth); setRcReason(''); };
+  const applyRoleChange=(s)=>{
+    const cur=roleOn(s,todayZagreb());
+    if(rcRole===cur){ setToast({msg:'Nova uloga je ista kao trenutačna.',type:'error'}); return; }
+    if(!rcFrom){ setToast({msg:'Upiši datum od kojeg vrijedi.',type:'error'}); return; }
+    const segs=roleSegments(s).map(x=>({...x}));
+    const last=segs[segs.length-1];
+    if(last.from && rcFrom<=last.from){ setToast({msg:'Datum mora biti nakon početka trenutačnog razdoblja ('+fmtDate(last.from)+').',type:'error'}); return; }
+    if(!confirm('Promjena uloge za '+s.name+':\n\n'+cur.toUpperCase()+' → '+rcRole.toUpperCase()+'\nvrijedi od '+fmtDate(rcFrom)+' nadalje.\n\nPovijesni promet, isplate i obračuni PRIJE tog datuma neće se mijenjati.\n\nNastaviti?')) return;
+    last.to=DAY_BEFORE(rcFrom);
+    segs.push({role:rcRole,from:rcFrom,to:null,by:'admin',at:new Date().toISOString(),reason:rcReason.trim()});
+    const nowRole=roleOnSegs(segs,todayZagreb());
+    const newStaffArr=data.staff.map(x=>x.id===s.id?{...x,roleHistory:segs,role:nowRole}:x);
+    const auditEntry={id:'a_'+uid(),action:'promjena_uloge',at:new Date().toISOString(),by:'admin',staff:s.name,oldValue:cur,newValue:rcRole,period:rcFrom,note:rcReason.trim()};
+    save({...data,staff:newStaffArr,audit:[...(data.audit||[]),auditEntry]});
+    setRoleEditId(null); setRcReason('');
+    setToast({msg:'Uloga promijenjena ('+rcRole+' od '+fmtDate(rcFrom)+').'});
+  };
   const [newSvc,  setNewSvc  ]=useState({name:'',price:'',category:''});
   const [svcOpenCats, setSvcOpenCats] = useState(new Set());
   const [newSvcInCat, setNewSvcInCat] = useState({});
@@ -2983,16 +3041,24 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
           {data.staff.map(s=>{
             const salonColor = s.salonId==='savska'?'#9A6A3C':s.salonId==='dobojska'?'#C9A66B':'#888';
             const salonLabel = s.salonId==='savska'?'Savska':s.salonId==='dobojska'?'Dobojska':'Oba';
+            const curRole = roleOn(s, todayZagreb());
+            const hist = roleSegments(s);
             return (
-              <div key={s.id} className="salon-list-item" style={{flexWrap:'wrap',gap:6,opacity:s.hidden?0.5:1}}>
+              <React.Fragment key={s.id}>
+              <div className="salon-list-item" style={{flexWrap:'wrap',gap:6,opacity:s.hidden?0.5:1}}>
                 <span>👤</span>
                 <strong style={{flex:1,minWidth:120}}>{s.name}</strong>
                 <span style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:20,
-                  background: s.role==='praktikantica' ? '#FFF3E0' : '#E8F5E9',
-                  color: s.role==='praktikantica' ? '#E65100' : '#2E7D32',
-                  border: `1px solid ${s.role==='praktikantica'?'#FFCC80':'#A5D6A7'}`}}>
-                  {s.role==='praktikantica'?'praktikantica':'djelatnica'}
+                  background: curRole==='praktikantica' ? '#FFF3E0' : '#E8F5E9',
+                  color: curRole==='praktikantica' ? '#E65100' : '#2E7D32',
+                  border: `1px solid ${curRole==='praktikantica'?'#FFCC80':'#A5D6A7'}`}}>
+                  {curRole==='praktikantica'?'praktikantica':'djelatnica'}
                 </span>
+                <button onClick={()=>roleEditId===s.id?setRoleEditId(null):openRoleEdit(s)}
+                  title="Promijeni ulogu od određenog datuma"
+                  style={{padding:'2px 8px',borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',background:'transparent',border:'1.5px solid #7B5EA7',color:'#7B5EA7'}}>
+                  ⇄ Uloga
+                </button>
                 <input defaultValue={(data.staffPins||{})[s.id]||s.pin||''} placeholder="PIN" title="PIN za ekran 'Provjera današnjeg prometa'"
                   onBlur={e=>{ const v=e.target.value.trim(); const cur=(data.staffPins||{})[s.id]||s.pin||'';
                     if(v!==cur){ const np={...(data.staffPins||{})}; if(v){np[s.id]=v;}else{delete np[s.id];}
@@ -3021,12 +3087,51 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
                   save({...data,staff:data.staff.filter(x=>x.id!==s.id)});
                 }}>✕</button>
               </div>
+              {roleEditId===s.id && (
+                <div style={{margin:'2px 0 12px 30px',padding:'14px 16px',background:'#F6F3FB',border:'1.5px solid #D9CCEF',borderRadius:10}}>
+                  <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:'#5B3E8E'}}>⇄ Promjena uloge — {s.name}</div>
+                  <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end',marginBottom:10}}>
+                    <div><div style={{fontSize:11,color:'#888',marginBottom:3}}>Trenutačno</div>
+                      <div style={{fontWeight:600,fontSize:13}}>{curRole}</div></div>
+                    <div style={{fontSize:18,color:'#aaa',paddingBottom:2}}>→</div>
+                    <div><div style={{fontSize:11,color:'#888',marginBottom:3}}>Nova uloga</div>
+                      <select value={rcRole} onChange={e=>setRcRole(e.target.value)}
+                        style={{padding:'7px 10px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13}}>
+                        <option value="djelatnica">djelatnica</option>
+                        <option value="praktikantica">praktikantica</option>
+                      </select></div>
+                    <div><div style={{fontSize:11,color:'#888',marginBottom:3}}>Vrijedi od</div>
+                      <input type="date" value={rcFrom} onChange={e=>setRcFrom(e.target.value)}
+                        style={{padding:'6px 10px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13}} /></div>
+                    <div style={{flex:'1 1 180px'}}><div style={{fontSize:11,color:'#888',marginBottom:3}}>Napomena</div>
+                      <input value={rcReason} onChange={e=>setRcReason(e.target.value)} placeholder="npr. zapošljavanje nakon prakse"
+                        style={{width:'100%',padding:'6px 10px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:13}} /></div>
+                  </div>
+                  <div style={{fontSize:11.5,color:'#6b5320',background:'#FBF3E2',border:'1px solid #EBD9AE',borderRadius:8,padding:'7px 10px',marginBottom:10}}>
+                    ⚠️ Promjena vrijedi od odabranog datuma nadalje. Povijesni promet, isplate i obračuni prije tog datuma neće se mijenjati. Pravilo: djelatnica „pokriva" cijeli mjesec u kojem je ijedan dan bila djelatnica.
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button className="btn btn-primary btn-sm" onClick={()=>applyRoleChange(s)}>Spremi promjenu</button>
+                    <button className="btn btn-outline btn-sm" onClick={()=>setRoleEditId(null)}>Odustani</button>
+                  </div>
+                  <div style={{marginTop:12,borderTop:'1px solid #E4DAF3',paddingTop:8}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#5B3E8E',marginBottom:5}}>POVIJEST ULOGA</div>
+                    {hist.map((h,i)=>(
+                      <div key={i} style={{fontSize:12,color:'#555',padding:'2px 0'}}>
+                        {h.from?fmtDate(h.from):'od početka'} – {h.to?fmtDate(h.to):'danas'} : <strong>{h.role}</strong>
+                        {h.reason?<span style={{color:'#999'}}> · {h.reason}</span>:null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </React.Fragment>
             );
           })}
           <div style={{marginTop:16,display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
             <input value={newStaff} onChange={e=>setNewStaff(e.target.value)} placeholder="Ime i prezime"
               style={{padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14,flex:'1 1 160px'}}
-              onKeyDown={e=>{ if(e.key==='Enter'&&newStaff.trim()){ save({...data,staff:[...data.staff,{id:uid(),name:newStaff.trim(),role:newStaffRole,salonId:newStaffSalon}]}); setNewStaff(''); }}}/>
+              onKeyDown={e=>{ if(e.key==='Enter'&&newStaff.trim()){ save({...data,staff:[...data.staff,{id:uid(),name:newStaff.trim(),role:newStaffRole,salonId:newStaffSalon,roleHistory:[{role:newStaffRole,from:null,to:null,by:'admin',at:new Date().toISOString(),reason:'Dodavanje djelatnice'}]}]}); setNewStaff(''); }}}/>
             <select value={newStaffRole} onChange={e=>setNewStaffRole(e.target.value)}
               style={{padding:'8px 12px',border:'1.5px solid var(--border)',borderRadius:8,fontSize:14,background:'var(--card)',color:'var(--text)'}}>
               <option value="djelatnica">djelatnica</option>
@@ -3040,7 +3145,7 @@ function Postavke({ data, onRefresh, salonId, onLogout }) {
             </select>
             <button className="btn btn-primary btn-sm" onClick={()=>{
               if(!newStaff.trim()) return;
-              save({...data,staff:[...data.staff,{id:uid(),name:newStaff.trim(),role:newStaffRole,salonId:newStaffSalon}]});
+              save({...data,staff:[...data.staff,{id:uid(),name:newStaff.trim(),role:newStaffRole,salonId:newStaffSalon,roleHistory:[{role:newStaffRole,from:null,to:null,by:'admin',at:new Date().toISOString(),reason:'Dodavanje djelatnice'}]}]});
               setNewStaff('');
             }}>+ Dodaj</button>
           </div>
@@ -4621,7 +4726,7 @@ function Provjera({ data, salonId, saveData, onRefresh }) {
       {salonId==='all' && prvView==='staff' && visibleCols.length>0 && (()=>{
         const bonusPayments = new Set(STAFF_PROMET);
         const staffRoleMap = {};
-        (data.staff||[]).forEach(s=>{ staffRoleMap[(s.name||'').toUpperCase().trim()] = s.role||'djelatnica'; });
+        (data.staff||[]).forEach(s=>{ staffRoleMap[(s.name||'').toUpperCase().trim()] = roleOn(s, todayZagreb()); });
         const bonusTotals = {};
         entries.forEach(e=>{
           const pay = normPayment(e.payment)||'';
@@ -6808,7 +6913,7 @@ function Semafor({ data }) {
   const salons = data.salons || [];
   const salonIds = salons.map(s=>s.id);
   const defPlace = useMemo(()=>{ const d={}; salons.forEach(sl=>{
-      const n=(data.staff||[]).filter(s=>(s.role||'djelatnica')!=='praktikantica' && !SEMAFOR_OWNERS.includes(semNP(s.name)) && s.salonId===sl.id).length;
+      const n=(data.staff||[]).filter(s=>roleOn(s, todayZagreb())!=='praktikantica' && !SEMAFOR_OWNERS.includes(semNP(s.name)) && s.salonId===sl.id).length;
       d[sl.id]= n*SEMAFOR_PLACA_OSOBA + 600; }); return d; }, [salons, data.staff]);
   const [place, setPlace] = useState(()=>{ const p={}; salonIds.forEach(id=>p[id]=(cfg.place && cfg.place[id]!=null)?cfg.place[id]:(defPlace[id]||0)); return p; });
   useEffect(()=>{ if(cfg.place){ setPlace(prev=>{ const p={...prev}; salonIds.forEach(id=>{ if(cfg.place[id]!=null) p[id]=cfg.place[id]; }); return p; }); } }, [JSON.stringify(cfg.place)]);
@@ -6895,8 +7000,11 @@ const OBR_N=s=>String(s||'').replace(/\s+/g,' ').trim().toUpperCase();
 
 function computeObracun(data, month){
   const bonusPayments=new Set(STAFF_PROMET);
-  const roleMap={}, homeMap={};
-  (data.staff||[]).forEach(s=>{ const n=OBR_N(s.name); roleMap[n]=(s.role||'djelatnica'); homeMap[n]=s.salonId; });
+  // Uloga se određuje PO MJESECU OBRAČUNA (roleForMonth), ne po trenutnoj ulozi —
+  // tako prošli mjeseci ostaju po ulozi koja je tada vrijedila (vidi roleHistory).
+  const staffByName={}, homeMap={};
+  (data.staff||[]).forEach(s=>{ const n=OBR_N(s.name); staffByName[n]=s; homeMap[n]=s.salonId; });
+  const roleOfMonth = st => roleForMonth(staffByName[st], month) || 'djelatnica';
   const promet={}, paket={}, salonOf={};
   (data.entries||[]).forEach(e=>{
     if(!e || String(e.date||'').slice(0,7)!==month) return;
@@ -6910,13 +7018,13 @@ function computeObracun(data, month){
   const push=(tip,st,salon,osnova,iznos,label)=>{ if(iznos>0.005) items.push({tip,staff:st,salon:salon||'',osnova:Math.round(osnova*100)/100,iznos:Math.round(iznos*100)/100,label}); };
   Object.keys(promet).forEach(st=>{
     if(OBR_OWNERS.includes(st)) return;
-    const role=roleMap[st]||'djelatnica'; const salon=homeMap[st]||salonOf[st]||''; const pr=promet[st]||0; const pk=paket[st]||0;
+    const role=roleOfMonth(st); const salon=homeMap[st]||salonOf[st]||''; const pr=promet[st]||0; const pk=paket[st]||0;
     if(role==='praktikantica') push('isplata',st,salon,pr,pr*0.15,'Isplata '+st);
     else push('bonus',st,salon,pr,obrCalcBonus(pr),'Bonus '+st);
     if(pr>4000 && pk>0) push('paketi',st,salon,pk,pk*0.15,'Provizija paketi '+st);
   });
   (data.salons||[]).forEach(sl=>{
-    const dj=Object.keys(promet).filter(st=>!OBR_OWNERS.includes(st) && (roleMap[st]||'djelatnica')==='djelatnica' && (homeMap[st]||salonOf[st])===sl.id);
+    const dj=Object.keys(promet).filter(st=>!OBR_OWNERS.includes(st) && roleOfMonth(st)==='djelatnica' && (homeMap[st]||salonOf[st])===sl.id);
     const goal=dj.reduce((s,st)=>s+(promet[st]||0),0);
     const per=goal>=18000?300:(goal>=15000?150:0);
     if(per>0) dj.forEach(st=>push('team',st,sl.id,goal,per,'Team bonus '+st));
